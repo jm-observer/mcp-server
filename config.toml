@@ -7,4 +7,4 @@ timeout_secs = 60
 allowed_dirs = ["D:\\git\\mcp-server"]
 
 [security]
-allow_direct_command = false
+allow_direct_command = true

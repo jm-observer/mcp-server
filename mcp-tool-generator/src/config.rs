@@ -1,0 +1,31 @@
+use clap::Parser;
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about = "MCP Tool Generator - creates tool definitions by inspecting commands", long_about = None)]
+pub struct GeneratorConfig {
+    #[arg(short = 's', long = "mcp-server", default_value = "mcp-server")]
+    pub mcp_server_path: String,
+
+    #[arg(short = 'c', long, default_value = "config.toml")]
+    pub server_config_path: String,
+
+    #[arg(short = 'u', long, default_value = "http://localhost:8000")]
+    pub vllm_url: String,
+
+    #[arg(short = 'm', long, default_value_t = 3)]
+    pub max_depth: usize,
+
+    #[arg()]
+    pub command_name: String,
+
+    #[arg(short, long)]
+    pub output_path: Option<String>,
+}
+
+impl GeneratorConfig {
+    pub fn validate(&mut self) {
+        if self.max_depth > 5 {
+            self.max_depth = 5;
+        }
+    }
+}

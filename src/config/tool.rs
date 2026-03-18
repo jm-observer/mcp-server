@@ -1,16 +1,17 @@
 use serde::Deserialize;
+use schemars::JsonSchema;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ToolFile {
     pub config: Option<ToolFileConfig>,
     #[serde(default)]
     pub tools: Vec<ToolDef>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct ToolFileConfig {
     pub working_dir: Option<String>,
     pub timeout_secs: Option<u64>,
@@ -18,7 +19,7 @@ pub struct ToolFileConfig {
     pub base_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct ToolDef {
     pub name: String,
     pub description: String,
@@ -42,14 +43,14 @@ pub struct ToolDef {
     pub parameters: Option<Vec<ParameterDef>>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolType {
     Command,
     Http,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct ParameterDef {
     pub name: String,
     pub description: String,

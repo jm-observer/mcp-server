@@ -89,19 +89,26 @@ async fn run_sse_server(handler: McpHandler, config: &ServerConfig) -> std::io::
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let args: Vec<String> = std::env::args().collect();
 
     if args.contains(&"--schema".to_string()) {
+        println!("{}", mcp_server::config::tool_config_schema());
         return Ok(());
     }
 
-    let config_path = Path::new("config.toml");
+    let mut config_path = Path::new("config.toml").to_path_buf();
+    for i in 0..args.len() {
+        if args[i] == "--config" && i + 1 < args.len() {
+            config_path = Path::new(&args[i + 1]).to_path_buf();
+        }
+    }
+
     let server_config = if config_path.exists() {
-        let content = fs::read_to_string(config_path)?;
-        toml::from_str::<ServerConfig>(&content).expect("Failed to parse config.toml")
+        let content = fs::read_to_string(&config_path)?;
+        toml::from_str::<ServerConfig>(&content).expect("Failed to parse config")
     } else {
-        panic!("config.toml not found");
+        panic!("Config file not found: {:?}", config_path);
     };
     info!("Loaded server config");
 
@@ -113,7 +120,12 @@ async fn main() -> std::io::Result<()> {
         info!("Builtin direct_command tool registered");
     }
 
-    let tools_dir = Path::new("tools.d");
+    let config_dir = config_path.parent().unwrap_or(Path::new(""));
+    let tools_dir = if config_dir.as_os_str().is_empty() {
+        Path::new("tools.d").to_path_buf()
+    } else {
+        config_dir.join("tools.d")
+    };
     if tools_dir.exists() && tools_dir.is_dir() {
         for entry in fs::read_dir(tools_dir)? {
             let entry = entry?;
@@ -140,7 +152,7 @@ async fn main() -> std::io::Result<()> {
     let handler = McpHandler::new(Arc::new(registry), Arc::new(server_config.clone()));
 
     if args.contains(&"--stdio".to_string()) {
-        panic!("stdio mode under construction");
+        mcp_server::transport::stdio::run_stdio(Arc::new(handler)).await
     } else {
         run_sse_server(handler, &server_config).await
     }
