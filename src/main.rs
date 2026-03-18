@@ -1,23 +1,118 @@
-use mcp_server::config::{ServerConfig, ToolRegistry, ToolFile};
-use tracing::{info, error};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use mcp_server::config::{ServerConfig, ToolFile, ToolRegistry};
+use mcp_server::protocol::McpHandler;
+use mcp_server::transport::sse::SessionManager;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
+use tracing::{error, info};
+use bytes::Bytes;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
+#[derive(Clone)]
+pub struct AppState {
+    pub handler: Arc<McpHandler>,
+    pub sessions: Arc<SessionManager>,
+}
 
-    // 1. 加载 ServerConfig
-    let server_config = if Path::new("config.toml").exists() {
-        let content = fs::read_to_string("config.toml")?;
-        toml::from_str::<ServerConfig>(&content)?
-    } else {
-        ServerConfig::default()
+#[derive(Deserialize)]
+struct SessionQuery {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+}
+
+async fn sse_connect(state: web::Data<AppState>) -> impl Responder {
+    let (session_id, mut rx) = state.sessions.create_session();
+    let endpoint_url = format!("/message?sessionId={}", session_id);
+
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("Connection", "keep-alive"))
+        .streaming(async_stream::stream! {
+            yield Ok::<_, actix_web::Error>(
+                Bytes::from(format!("event: endpoint\ndata: {}\n\n", endpoint_url))
+            );
+
+            while let Some(message) = rx.recv().await {
+                yield Ok(
+                    Bytes::from(format!("event: message\ndata: {}\n\n", message))
+                );
+            }
+        })
+}
+
+async fn handle_message(
+    body: web::Json<Value>,
+    query: web::Query<SessionQuery>,
+    state: web::Data<AppState>,
+) -> impl Responder {
+    let session_id = &query.session_id;
+
+    if !state.sessions.contains(session_id) {
+        return HttpResponse::NotFound().json(json!({"error": "session not found"}));
+    }
+
+    let request_str = serde_json::to_string(&body.into_inner()).unwrap();
+
+    match state.handler.handle_request(&request_str).await {
+        Some(response) => {
+            if let Err(_) = state.sessions.send(session_id, response) {
+                return HttpResponse::Gone().json(json!({"error": "session closed"}));
+            }
+            HttpResponse::Accepted().finish()
+        }
+        None => HttpResponse::Accepted().finish(),
+    }
+}
+
+async fn run_sse_server(handler: McpHandler, config: &ServerConfig) -> std::io::Result<()> {
+    let app_state = AppState {
+        handler: Arc::new(handler),
+        sessions: Arc::new(SessionManager::new()),
     };
-    info!("Loaded server config: {:?}", server_config);
 
-    // 2. 加载 ToolRegistry
+    let bind_addr = (config.server.host.as_str(), config.server.port);
+    info!("Starting SSE server on {}:{}", bind_addr.0, bind_addr.1);
+
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(app_state.clone()))
+            .route("/sse", web::get().to(sse_connect))
+            .route("/message", web::post().to(handle_message))
+    })
+    .bind(bind_addr)?
+    .run()
+    .await
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    tracing_subscriber::fmt::init();
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.contains(&"--schema".to_string()) {
+        return Ok(());
+    }
+
+    let config_path = Path::new("config.toml");
+    let server_config = if config_path.exists() {
+        let content = fs::read_to_string(config_path)?;
+        toml::from_str::<ServerConfig>(&content).expect("Failed to parse config.toml")
+    } else {
+        panic!("config.toml not found");
+    };
+    info!("Loaded server config");
+
     let mut registry = ToolRegistry::new();
+    
+    // Register builtin tool if allowed
+    if server_config.security.allow_direct_command {
+        registry.register_builtin_direct_command();
+        info!("Builtin direct_command tool registered");
+    }
+
     let tools_dir = Path::new("tools.d");
     if tools_dir.exists() && tools_dir.is_dir() {
         for entry in fs::read_dir(tools_dir)? {
@@ -42,8 +137,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("tools.d directory not found or is not a directory");
     }
 
-    info!("Loaded {} tools", registry.len());
-    info!("Tool names: {:?}", registry.tool_names());
+    let handler = McpHandler::new(Arc::new(registry), Arc::new(server_config.clone()));
 
-    Ok(())
+    if args.contains(&"--stdio".to_string()) {
+        panic!("stdio mode under construction");
+    } else {
+        run_sse_server(handler, &server_config).await
+    }
 }

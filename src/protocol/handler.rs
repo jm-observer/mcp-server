@@ -194,8 +194,52 @@ impl McpHandler {
 
         use crate::config::ToolType;
         use crate::executor::command::CommandExecutor;
+        use crate::executor::http::HttpExecutor;
         
-        if tool.def.r#type == Some(ToolType::Command) {
+        if call_params.name == "direct_command" {
+            let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
+            let cmd_str = provided_args.get("command").and_then(|v| v.as_str()).unwrap_or_default();
+            
+            let mut parsed_args = Vec::new();
+            if let Some(Value::Array(arr)) = provided_args.get("args") {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        parsed_args.push(s.to_string());
+                    }
+                }
+            } else if let Some(Value::String(s)) = provided_args.get("args") {
+                parsed_args = s.split_whitespace().map(|s| s.to_string()).collect();
+            }
+            
+            let wd = provided_args.get("working_dir").and_then(|v| v.as_str()).map(std::path::Path::new);
+
+            match executor.execute_direct(cmd_str, &parsed_args, wd).await {
+                Ok(res) => {
+                    let mut content = vec![];
+                    if !res.stdout.is_empty() {
+                        content.push(ContentBlock { r#type: "text".into(), text: res.stdout });
+                    }
+                    if !res.stderr.is_empty() {
+                        content.push(ContentBlock { r#type: "text".into(), text: res.stderr });
+                    }
+                    if content.is_empty() {
+                        content.push(ContentBlock { r#type: "text".into(), text: "(Empty Output)".into() });
+                    }
+                    let call_result = ToolCallResult {
+                        content,
+                        is_error: if res.exit_code != 0 { Some(true) } else { None },
+                    };
+                    JsonRpcResponse { jsonrpc: "2.0".into(), id: Some(id), result: Some(serde_json::to_value(call_result).unwrap()), error: None }
+                }
+                Err(e) => {
+                    let call_result = ToolCallResult {
+                        content: vec![ContentBlock { r#type: "text".into(), text: format!("Execution Error: {}", e) }],
+                        is_error: Some(true),
+                    };
+                    JsonRpcResponse { jsonrpc: "2.0".into(), id: Some(id), result: Some(serde_json::to_value(call_result).unwrap()), error: None }
+                }
+            }
+        } else if tool.def.r#type == Some(ToolType::Command) {
             let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
             match executor.execute(tool, &provided_args).await {
                 Ok(res) => {
@@ -254,12 +298,51 @@ impl McpHandler {
                     }
                 }
             }
+        } else if tool.def.r#type == Some(ToolType::Http) {
+            let executor = HttpExecutor::new();
+            match executor.execute(tool, &provided_args).await {
+                Ok(res) => {
+                    let content = vec![ContentBlock {
+                        r#type: "text".into(),
+                        text: res.body,
+                    }];
+                    
+                    let is_error = if res.status >= 400 { Some(true) } else { None };
+                    
+                    let call_result = ToolCallResult {
+                        content,
+                        is_error,
+                    };
+
+                    JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: Some(serde_json::to_value(call_result).unwrap()),
+                        error: None,
+                    }
+                }
+                Err(e) => {
+                    let call_result = ToolCallResult {
+                        content: vec![ContentBlock {
+                            r#type: "text".into(),
+                            text: format!("Executor Error: {}", e),
+                        }],
+                        is_error: Some(true),
+                    };
+
+                    JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: Some(serde_json::to_value(call_result).unwrap()),
+                        error: None,
+                    }
+                }
+            }
         } else {
-            // Not command, return not implemented
             let call_result = ToolCallResult {
                 content: vec![ContentBlock {
                     r#type: "text".into(),
-                    text: "Not implemented for non-command tool".into(),
+                    text: "Not implemented or unknown tool type".into(),
                 }],
                 is_error: Some(true),
             };

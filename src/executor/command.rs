@@ -203,4 +203,105 @@ impl CommandExecutor {
             }
         }
     }
+
+    pub async fn execute_direct(
+        &self,
+        command: &str,
+        args: &[String],
+        working_dir: Option<&std::path::Path>,
+    ) -> Result<CommandResult, CommandError> {
+        let work_dir = if let Some(p) = working_dir {
+            validate_working_dir(p, &self.allowed_dirs)?;
+            p.to_path_buf()
+        } else {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            validate_working_dir(&cwd, &self.allowed_dirs)?;
+            cwd
+        };
+
+        let mut child_cmd = Command::new(command);
+        child_cmd.args(args)
+                 .current_dir(work_dir)
+                 .stdout(Stdio::piped())
+                 .stderr(Stdio::piped())
+                 .stdin(Stdio::null());
+
+        let mut child = child_cmd.spawn()?;
+
+        let mut stdout = child.stdout.take().unwrap();
+        let mut stderr = child.stderr.take().unwrap();
+
+        let process_future = async {
+            let limit = 50 * 1024; // 50KB
+
+            let mut out_buf = Vec::new();
+            let mut buf = [0u8; 4096];
+            let mut out_len = 0;
+
+            let mut err_buf = Vec::new();
+            let mut err_buf_arr = [0u8; 4096];
+            let mut err_len = 0;
+
+            let out_reader = async {
+                loop {
+                    match stdout.read(&mut buf).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let remain = limit - out_len;
+                            if remain == 0 {
+                                continue;
+                            }
+                            let to_take = n.min(remain);
+                            out_buf.extend_from_slice(&buf[..to_take]);
+                            out_len += to_take;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                out_buf
+            };
+
+            let err_reader = async {
+                loop {
+                    match stderr.read(&mut err_buf_arr).await {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let remain = limit - err_len;
+                            if remain == 0 {
+                                continue;
+                            }
+                            let to_take = n.min(remain);
+                            err_buf.extend_from_slice(&err_buf_arr[..to_take]);
+                            err_len += to_take;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                err_buf
+            };
+
+            let (status, out_bytes, err_bytes) = tokio::join!(
+                child.wait(),
+                out_reader,
+                err_reader
+            );
+
+            let exit_code = status.map(|s| s.code().unwrap_or(1)).unwrap_or(1);
+
+            CommandResult {
+                stdout: String::from_utf8_lossy(&out_bytes).into_owned(),
+                stderr: String::from_utf8_lossy(&err_bytes).into_owned(),
+                exit_code,
+            }
+        };
+
+        let timeout_duration = Duration::from_secs(60); // Use large timeout
+        match timeout(timeout_duration, process_future).await {
+            Ok(res) => Ok(res),
+            Err(_) => {
+                let _ = child.kill().await;
+                Err(CommandError::Timeout)
+            }
+        }
+    }
 }

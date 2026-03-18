@@ -157,4 +157,51 @@ impl ToolRegistry {
     pub fn tool_names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
+
+    pub fn register_builtin_direct_command(&mut self) {
+        let def = ToolDef {
+            name: "direct_command".to_string(),
+            description: "Execute an arbitrary shell command".to_string(),
+            r#type: Some(ToolType::Command),
+            command: None,
+            args: None,
+            env: None,
+            sub_dir: None,
+            method: None,
+            path: None,
+            body: None,
+            content_type: None,
+            timeout_secs: None,
+            parameters: Some(vec![
+                ParameterDef {
+                    name: "command".to_string(),
+                    description: "要执行的命令".to_string(),
+                    r#type: "string".to_string(),
+                    required: true,
+                },
+                ParameterDef {
+                    name: "args".to_string(),
+                    description: "命令参数".to_string(),
+                    r#type: "array".to_string(),
+                    required: false,
+                },
+                ParameterDef {
+                    name: "working_dir".to_string(),
+                    description: "工作目录".to_string(),
+                    r#type: "string".to_string(),
+                    required: false,
+                },
+            ]),
+        };
+
+        let registered = RegisteredTool {
+            def,
+            working_dir: None,
+            base_url: None,
+            effective_timeout: 60,
+            env: HashMap::new(),
+        };
+
+        self.tools.insert(registered.def.name.clone(), registered);
+    }
 }
