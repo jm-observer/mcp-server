@@ -138,14 +138,33 @@ impl McpClient {
 
         let resp = self.send_request("tools/call", run_params).await?;
         if let Some(result) = resp.result {
-             Ok(CommandOutput {
-                 stdout: serde_json::to_string(&result)?,
-                 stderr: "".to_string(),
-             })
+             let mut out_text = String::new();
+             let mut is_error = false;
+             if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+                 for block in content {
+                     if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                         out_text.push_str(text);
+                     }
+                 }
+                 if let Some(err) = result.get("isError").and_then(|e| e.as_bool()) {
+                     is_error = err;
+                 }
+             }
+
+             if is_error {
+                 Ok(CommandOutput {
+                     stdout: "".to_string(),
+                     stderr: out_text,
+                 })
+             } else {
+                 Ok(CommandOutput {
+                     stdout: out_text,
+                     stderr: "".to_string(),
+                 })
+             }
         } else {
              Err(anyhow!("No result in tools/call response"))
         }
-
     }
 
     pub fn get_tool_schema(&self) -> String {
