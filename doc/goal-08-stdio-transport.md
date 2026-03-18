@@ -40,22 +40,39 @@ MCP stdio 协议规范：
 - stderr 用于日志输出（不干扰协议通信）
 
 ```rust
-pub async fn run_stdio(handler: McpHandler) -> Result<()> {
+pub async fn run_stdio(handler: Arc<McpHandler>) -> Result<()> {
     let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
     let reader = BufReader::new(stdin);
     let mut lines = reader.lines();
 
+    // 建立一个响应发送通道，专用于将并发处理结果串行安全写入 stdout 
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+    // 独立的 Writer 任务，防止并发下的换行数据错乱
+    tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(response) = rx.recv().await {
+            use tokio::io::AsyncWriteExt;
+            let _ = stdout.write_all(format!("{}\n", response).as_bytes()).await;
+            let _ = stdout.flush().await;
+        }
+    });
+
+    // Reader 循环（并发派发机制，彻底消除耗时命令导致的协议连接断开与假死）
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handler.handle_request(&line).await {
-            let mut out = stdout.lock();
-            writeln!(out, "{}", response)?;
-            out.flush()?;
-        }
-        // notification（如 initialized）不返回响应，跳过输出
+        
+        let handler_clone = handler.clone();
+        let tx_clone = tx.clone();
+        
+        tokio::spawn(async move {
+            if let Some(response) = handler_clone.handle_request(&line).await {
+                // notification（如 initialized）不返回响应，无 response 时跳过输出
+                let _ = tx_clone.send(response);
+            }
+        });
     }
     Ok(())
 }

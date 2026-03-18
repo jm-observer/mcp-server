@@ -49,9 +49,10 @@ impl HttpExecutor {
 
 执行流程：
 1. 构建 URL：`base_url`（来自 [config]）+ `path`（来自 tool 定义）
-2. 解析参数模板：`path`、`body` 中的 `${var}` 占位符
+2. 解析参数模板：`path`、`body` 中的 `${var}` 占位符（**注意：用于 `path` 的变量值在替换为真实数据前，必须进行安全的 URL Encode，防止非法字符破坏网络请求**）
 3. 构建请求：
    - method: GET / POST / PUT / DELETE 等
+   - 根据全局与该 Tool 单独配置的 `headers` 项注入鉴权或业务自定义 HTTP 请求头
    - 如有 body 和 content_type，设置请求体和 Content-Type header
 4. 发送请求：受 `effective_timeout` 控制（reqwest 的 timeout 设置）
 5. 收集结果：status code、response body
@@ -104,6 +105,7 @@ description = "Test HTTP POST request"
 type = "http"
 method = "POST"
 path = "/post"
+# 还可以在此处加入： headers = { "Authorization" = "Bearer xxx" } 以满足鉴权 API 需要
 body = '{"message": "hello"}'
 content_type = "application/json"
 
