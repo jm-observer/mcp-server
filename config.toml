@@ -1,0 +1,10 @@
+[server]
+host = "127.0.0.1"
+port = 3000
+
+[defaults]
+timeout_secs = 60
+allowed_dirs = ["D:\\git\\mcp-server"]
+
+[security]
+allow_direct_command = false
