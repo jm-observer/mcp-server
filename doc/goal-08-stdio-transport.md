@@ -1,46 +1,36 @@
-# Goal 08: mcp-server stdio 传输支持
+# Goal 08: stdio 传输
 
 ## 目标
 
-为 mcp-server 添加 stdio 传输模式，通过 `--stdio` 命令行参数启动。辅助工具将以子进程方式启动 mcp-server 并通过 stdin/stdout 通信。
+实现 MCP stdio 传输模式，与 SSE（Goal 04）共同构成 server 的两种核心传输方式。通过 `--stdio` 命令行参数启动，用于本地客户端直连和辅助工具子进程调用。
 
 ## 前置依赖
 
 - Goal 02（MCP 协议层、McpHandler）
 - Goal 03（Command 执行器）
-- Goal 04（HTTP Server，main.rs 结构）
 
 ## 涉及文件
 
 ```
 src/
-├── main.rs              # 增加 --stdio 分支，启动 stdio 循环
-├── lib.rs               # 导出 stdio 模块
-└── stdio.rs             # stdio 传输实现
+├── main.rs              # --stdio 分支启动 stdio 循环
+├── transport/
+│   ├── mod.rs           # 传输层模块声明
+│   └── stdio.rs         # stdio 传输实现
+└── lib.rs               # 导出 transport 模块
 ```
 
 ## 实现方式
 
-### 启动模式切换（main.rs）
+### 启动模式
 
-```rust
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.contains(&"--schema".to_string()) {
-        // Goal 07: 输出 JSON Schema
-        return;
-    }
-
-    if args.contains(&"--stdio".to_string()) {
-        // stdio 模式
-        run_stdio();
-    } else {
-        // 默认 HTTP 模式
-        run_http();
-    }
-}
 ```
+mcp-server              → SSE 模式（默认，Goal 04）
+mcp-server --stdio      → stdio 模式（本 Goal）
+mcp-server --schema     → 输出 JSON Schema（Goal 07）
+```
+
+三种模式互斥，main.rs 中统一判断。
 
 ### stdio 传输（stdio.rs）
 
@@ -84,14 +74,22 @@ pub mod config;
 pub mod protocol;
 pub mod executor;
 pub mod security;
-pub mod stdio;
+pub mod transport;   // 包含 sse 和 stdio
 ```
 
-辅助工具可以选择：
+辅助工具使用 stdio 的两种方式：
 1. 以子进程方式启动 `mcp-server --stdio`，通过 stdin/stdout 通信
 2. 直接依赖 lib，在进程内调用 `McpHandler`（更轻量）
 
-两种方式都支持。
+### 与 SSE 的关系
+
+两种传输方式共享同一个 `McpHandler`，差异仅在 I/O 层：
+
+```
+                ┌─── sse.rs ──── GET /sse + POST /message
+McpHandler ─────┤
+                └─── stdio.rs ── stdin / stdout
+```
 
 ## 测试
 
@@ -121,8 +119,8 @@ pub mod stdio;
 ## 完成标准
 
 - [ ] `mcp-server --stdio` 启动 stdio 模式
-- [ ] 无参数启动仍为 HTTP 模式（不影响已有功能）
+- [ ] 无参数启动为 SSE 模式（不影响 Goal 04 功能）
 - [ ] stdin/stdout 通信符合 MCP stdio 协议规范
 - [ ] 日志输出到 stderr，不干扰协议
 - [ ] 子进程通信集成测试通过
-- [ ] lib.rs 导出 stdio 模块供外部 crate 使用
+- [ ] lib.rs 导出 transport 模块供外部 crate 使用
