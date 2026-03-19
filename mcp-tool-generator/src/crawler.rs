@@ -1,4 +1,7 @@
 use anyhow::{anyhow, Result};
+use std::pin::Pin;
+use std::future::Future;
+use log::debug;
 use crate::mcp_client::McpClient;
 use crate::llm_client::LlmClient;
 use crate::types::{CommandHelp, FlatCommand};
@@ -7,15 +10,15 @@ use crate::prompt;
 pub struct HelpCrawler<'a> {
     mcp_client: &'a mut McpClient,
     llm_client: &'a LlmClient,
-    max_depth: usize,
+    depth: usize,
 }
 
 impl<'a> HelpCrawler<'a> {
-    pub fn new(mcp_client: &'a mut McpClient, llm_client: &'a LlmClient, max_depth: usize) -> Self {
+    pub fn new(mcp_client: &'a mut McpClient, llm_client: &'a LlmClient, depth: usize) -> Self {
         Self {
             mcp_client,
             llm_client,
-            max_depth,
+            depth,
         }
     }
 
@@ -23,7 +26,11 @@ impl<'a> HelpCrawler<'a> {
         self.crawl_recursive(&[command.to_string()], 0).await
     }
 
-    async fn crawl_recursive(&mut self, command_parts: &[String], depth: usize) -> Result<CommandHelp> {
+    fn crawl_recursive<'b>(&'b mut self, command_parts: &'b [String], depth: usize) -> Pin<Box<dyn Future<Output = Result<CommandHelp>> + 'b>> {
+        Box::pin(self.crawl_recursive_inner(command_parts, depth))
+    }
+
+    async fn crawl_recursive_inner(&mut self, command_parts: &[String], depth: usize) -> Result<CommandHelp> {
         let cmd = command_parts[0].clone();
         let mut args = command_parts[1..].to_vec();
         args.push("--help".to_string());
@@ -46,6 +53,7 @@ impl<'a> HelpCrawler<'a> {
                 }
             }
         };
+        debug!("{output:?}");
 
         // stdout is the actual help text, but stderr might contain it too. We use stdout mostly.
         let help_text = if !output.stdout.trim().is_empty() {
@@ -64,7 +72,7 @@ impl<'a> HelpCrawler<'a> {
             children: Vec::new(),
         };
 
-        if depth < self.max_depth {
+        if depth < self.depth {
             let cmd_str = command_parts.join(" ");
             let prompt = prompt::build_subcommand_prompt(&cmd_str, &help_text);
             

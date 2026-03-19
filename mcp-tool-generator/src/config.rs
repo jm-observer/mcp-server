@@ -12,8 +12,11 @@ pub struct GeneratorConfig {
     #[arg(short = 'u', long, default_value = "http://localhost:8000")]
     pub vllm_url: String,
 
-    #[arg(short = 'm', long, default_value_t = 3)]
-    pub max_depth: usize,
+    #[arg(short = 'm', long, default_value = "qwen3-coder")]
+    pub model: String,
+
+    #[arg(short = 'd', long, default_value_t = 2)]
+    pub depth: usize,
 
     #[arg()]
     pub command_name: String,
@@ -24,8 +27,8 @@ pub struct GeneratorConfig {
 
 impl GeneratorConfig {
     pub fn validate(&mut self) {
-        if self.max_depth > 5 {
-            self.max_depth = 5;
+        if self.depth > 5 {
+            self.depth = 5;
         }
     }
 }

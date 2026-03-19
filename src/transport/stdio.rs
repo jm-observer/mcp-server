@@ -2,7 +2,7 @@ use crate::protocol::McpHandler;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use tracing::error;
+use log::error;
 
 pub async fn run_stdio(handler: Arc<McpHandler>) -> std::io::Result<()> {
     let stdin = tokio::io::stdin();

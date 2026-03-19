@@ -30,6 +30,7 @@ pub struct JsonRpcResponse {
     pub error: Option<Value>,
 }
 
+#[derive(Debug)]
 pub struct CommandOutput {
     pub stdout: String,
     pub stderr: String,

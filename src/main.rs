@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{error, info};
+use log::{error, info, LevelFilter::{Debug, Info}};
 use bytes::Bytes;
 
 #[derive(Clone)]
@@ -89,7 +89,7 @@ async fn run_sse_server(handler: McpHandler, config: &ServerConfig) -> std::io::
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    let _ = custom_utils::logger::logger_feature("mcp-server", Debug, Info, false).build();
     let args: Vec<String> = std::env::args().collect();
 
     if args.contains(&"--schema".to_string()) {

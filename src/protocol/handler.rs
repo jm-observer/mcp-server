@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use log::debug;
 use serde_json::Value;
 use crate::config::{ServerConfig, ToolRegistry};
 use super::types::*;
@@ -39,7 +40,7 @@ impl McpHandler {
             };
             return Some(serde_json::to_string(&err_res).unwrap());
         }
-
+        debug!("{request}");
         let is_notification = req.id.is_none();
 
         let response = match req.method.as_str() {

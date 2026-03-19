@@ -15,7 +15,7 @@ use std::fs;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    custom_utils::logger::logger_stdout_debug();
     let mut args = config::GeneratorConfig::parse();
     args.validate();
 
@@ -48,11 +48,11 @@ async fn main() -> Result<()> {
     log::info!("MCP Handshake complete");
 
     // 2. Initialize LLM Client
-    let llm = LlmClient::new(&args.vllm_url, "qwen3-coder"); // Replace with actual model from config if needed
+    let llm = LlmClient::new(&args.vllm_url, &args.model);
 
     // 3. Recursive Crawling
-    log::info!("Starting recursive help crawl for {} (max_depth: {})", args.command_name, args.max_depth);
-    let mut crawler = HelpCrawler::new(&mut client, &llm, args.max_depth);
+    log::info!("Starting recursive help crawl for {} (depth: {})", args.command_name, args.depth);
+    let mut crawler = HelpCrawler::new(&mut client, &llm, args.depth);
     let help_tree = crawler.crawl(&args.command_name).await?;
     let flat_commands = HelpCrawler::flatten(&help_tree);
     log::info!("Crawled {} command variants", flat_commands.len());

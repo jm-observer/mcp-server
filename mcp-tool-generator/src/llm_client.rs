@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use log::debug;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -22,17 +23,17 @@ struct ChatRequest {
     max_tokens: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ChatChoice {
     message: ChatMessageResponse,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ChatMessageResponse {
     content: Option<String>,
 }
@@ -51,6 +52,10 @@ impl LlmClient {
 
     pub async fn chat(&self, messages: Vec<ChatMessage>) -> Result<String> {
         let url = format!("{}/v1/chat/completions", self.base_url);
+        debug!("Sending chat request to {}: {:?}", url, self.model);
+        for msg in &messages {
+            debug!("{}-{}", msg.role, msg.content);
+        }
         let req = ChatRequest {
             model: self.model.clone(),
             messages,
@@ -58,7 +63,8 @@ impl LlmClient {
             max_tokens: 2048,
         };
 
-        log::debug!("Sending chat request to {}: {:?}", url, req.model);
+
+
         let resp = self.client.post(&url).json(&req).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -67,6 +73,7 @@ impl LlmClient {
         }
 
         let mut chat_resp: ChatResponse = resp.json().await?;
+        debug!("chat resp: {chat_resp:?}");
         if chat_resp.choices.is_empty() {
             return Err(anyhow!("Empty choices in LLM response"));
         }
