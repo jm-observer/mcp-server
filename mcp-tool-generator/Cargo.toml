@@ -23,3 +23,11 @@ path = "src/bin/extract_subcommand_by_llm.rs"
 [[bin]]
 name = "generate_tool_toml"
 path = "src/bin/generate_tool_toml.rs"
+
+[[bin]]
+name = "deserialize_tool_toml"
+path = "src/bin/deserialize_tool_toml.rs"
+
+[[bin]]
+name = "extract_tool_action_by_llm"
+path = "src/bin/extract_tool_action_by_llm.rs"
