@@ -1,84 +1,58 @@
 use anyhow::{anyhow, Result};
+use async_openai::{
+    Client,
+    config::OpenAIConfig,
+    types::chat::{
+        ChatCompletionRequestMessage, CreateChatCompletionRequestArgs,
+    },
+};
 use log::debug;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 
 pub struct LlmClient {
-    client: Client,
-    base_url: String,
+    client: Client<OpenAIConfig>,
     model: String,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    temperature: f32,
-    max_tokens: usize,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChatChoice {
-    message: ChatMessageResponse,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChatMessageResponse {
-    content: Option<String>,
 }
 
 impl LlmClient {
     pub fn new(base_url: &str, model: &str) -> Self {
+        let base = base_url.trim_end_matches('/');
+        let api_base = if base.ends_with("/v1") {
+            base.to_string()
+        } else {
+            format!("{}/v1", base)
+        };
+        let config = OpenAIConfig::new().with_api_base(api_base);
         Self {
-            client: Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .unwrap(),
-            base_url: base_url.trim_end_matches('/').to_string(),
+            client: Client::with_config(config),
             model: model.to_string(),
         }
     }
 
-    pub async fn chat(&self, messages: Vec<ChatMessage>) -> Result<String> {
-        let url = format!("{}/v1/chat/completions", self.base_url);
-        debug!("Sending chat request to {}: {:?}", url, self.model);
+    pub async fn chat(&self, messages: Vec<ChatCompletionRequestMessage>) -> Result<String> {
+        debug!("Sending chat request with model: {}", self.model);
         for msg in &messages {
-            debug!("{}-{}", msg.role, msg.content);
-        }
-        let req = ChatRequest {
-            model: self.model.clone(),
-            messages,
-            temperature: 0.1,
-            max_tokens: 2048,
-        };
-
-
-
-        let resp = self.client.post(&url).json(&req).send().await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await?;
-            return Err(anyhow!("LLM API error: {} - {}", status, text));
+            debug!("{:?}", msg);
         }
 
-        let mut chat_resp: ChatResponse = resp.json().await?;
-        debug!("chat resp: {chat_resp:?}");
-        if chat_resp.choices.is_empty() {
-            return Err(anyhow!("Empty choices in LLM response"));
-        }
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(&self.model)
+            .messages(messages)
+            .temperature(0.1)
+            .max_tokens(4048u32)
+            .build()?;
 
-        let content = chat_resp.choices.remove(0).message.content.unwrap_or_default();
+        let response = self.client.chat().create(request).await
+            .map_err(|e| anyhow!("LLM API error: {}", e))?;
+
+        debug!("chat resp: {:?}", response);
+
+        let content = response
+            .choices
+            .first()
+            .and_then(|c| c.message.content.as_deref())
+            .ok_or_else(|| anyhow!("Empty choices in LLM response"))?
+            .to_string();
+
         Ok(content)
     }
 }

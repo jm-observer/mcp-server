@@ -1,4 +1,4 @@
-use crate::config::RegisteredTool;
+use crate::config::{RegisteredTool, ToolAction};
 use reqwest::{Client, Method, header::{HeaderMap, HeaderName, HeaderValue}};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -109,16 +109,21 @@ impl HttpExecutor {
         tool: &RegisteredTool,
         arguments: &HashMap<String, Value>,
     ) -> Result<HttpResult, HttpError> {
+        let (path_opt, method_opt, content_type_opt, body_opt) = match &tool.def.action {
+            ToolAction::Http { method, path, body, content_type } => (path, method, content_type, body),
+            _ => return Err(HttpError::MissingUrl),
+        };
+
         let base_url = tool.base_url.as_deref().unwrap_or("");
-        let t_path = tool.def.path.as_deref().unwrap_or("");
+        let t_path = path_opt.as_deref().unwrap_or("");
         let path_resolved = Self::resolve_template_url_encoded(t_path, arguments)?;
-        
+
         let url = format!("{}{}", base_url, path_resolved);
         if url.is_empty() {
             return Err(HttpError::MissingUrl);
         }
 
-        let method_str = tool.def.method.as_deref().unwrap_or("GET");
+        let method_str = method_opt.as_deref().unwrap_or("GET");
         let method = Method::from_bytes(method_str.as_bytes())
             .map_err(|_| HttpError::InvalidMethod(method_str.to_string()))?;
 
@@ -135,13 +140,13 @@ impl HttpExecutor {
             headers.insert(h_name, h_val);
         }
 
-        if let Some(ct) = &tool.def.content_type {
+        if let Some(ct) = content_type_opt {
             headers.insert(reqwest::header::CONTENT_TYPE, HeaderValue::from_str(ct).unwrap());
         }
-        
+
         req_builder = req_builder.headers(headers);
 
-        if let Some(body_tpl) = &tool.def.body {
+        if let Some(body_tpl) = body_opt {
             let body_resolved = Self::resolve_template(body_tpl, arguments)?;
             req_builder = req_builder.body(body_resolved);
         }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use log::debug;
 use serde_json::Value;
-use crate::config::{ServerConfig, ToolRegistry};
+use crate::config::{ServerConfig, ToolAction, ToolRegistry};
 use super::types::*;
 
 pub struct McpHandler {
@@ -193,7 +193,6 @@ impl McpHandler {
             }
         }
 
-        use crate::config::ToolType;
         use crate::executor::command::CommandExecutor;
         use crate::executor::http::HttpExecutor;
         
@@ -240,7 +239,7 @@ impl McpHandler {
                     JsonRpcResponse { jsonrpc: "2.0".into(), id: Some(id), result: Some(serde_json::to_value(call_result).unwrap()), error: None }
                 }
             }
-        } else if tool.def.r#type == Some(ToolType::Command) {
+        } else if matches!(tool.def.action, ToolAction::Command { .. }) {
             let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
             match executor.execute(tool, &provided_args).await {
                 Ok(res) => {
@@ -299,7 +298,7 @@ impl McpHandler {
                     }
                 }
             }
-        } else if tool.def.r#type == Some(ToolType::Http) {
+        } else if matches!(tool.def.action, ToolAction::Http { .. }) {
             let executor = HttpExecutor::new();
             match executor.execute(tool, &provided_args).await {
                 Ok(res) => {

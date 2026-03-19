@@ -1,0 +1,32 @@
+Rust's package manager
+
+Usage: cargo [+toolchain] [OPTIONS] [COMMAND]
+
+Commands:
+  build, b    Compile the current package
+  check, c    Analyze the current package and report errors, but don't build object files
+  clean       Remove the target directory
+  doc, d      Build this package's and its dependencies' documentation
+  new         Create a new cargo package
+  init        Create a new cargo package in an existing directory
+  add         Add dependencies to a manifest file
+  remove      Remove dependencies from a manifest file
+  run, r      Run a binary or example of the local package
+  test, t     Run the tests
+  bench       Run the benchmarks
+  update      Update dependencies listed in Cargo.lock
+  search      Search registry for crates
+  publish     Publish this package to the registry
+  install     Install a Rust binary
+  uninstall   Uninstall a Rust binary
+  clippy      Checks a package to catch common mistakes and improve your Rust code
+  fmt         Formats all bin and lib files of the current crate using rustfmt
+  fix         Automatically fix lint warnings reported by rustfmt
+  tree        Display a tree visualization of a dependency graph
+
+Options:
+  -V, --version   Print version info and exit
+  -h, --help      Print help
+  --list          List installed commands
+
+See 'cargo help <command>' for more information on a specific command.

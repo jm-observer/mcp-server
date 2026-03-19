@@ -11,6 +11,12 @@ pub struct FlatCommand {
     pub help_text: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SubcommandInfo {
+    pub command: String,
+    pub description: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
     pub toml_block: String,

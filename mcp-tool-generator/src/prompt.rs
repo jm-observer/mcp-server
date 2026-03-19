@@ -1,31 +1,75 @@
-use crate::types::{FlatCommand, ToolOutput};
-use crate::llm_client::ChatMessage;
+use crate::types::{FlatCommand, SubcommandInfo, ToolOutput};
+use async_openai::types::chat::{
+    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
+    ChatCompletionRequestUserMessageArgs,
+};
 
-pub fn build_subcommand_prompt(command: &str, help_text: &str) -> Vec<ChatMessage> {
-    let system = r#"你是一个命令行工具分析器。根据命令的 --help 输出，识别出所有可用的子命令。
+pub fn build_subcommand_prompt(command: &str, help_text: &str) -> Vec<ChatCompletionRequestMessage> {
+    let system = r#"
+    You are a CLI help parser.
 
-规则：
-1. 只返回子命令名称列表，每行一个
-2. 不包含选项/标志（如 --verbose, -h）
-3. 不包含 "help" 子命令本身
-4. 如果没有子命令，返回空（仅输出 "NONE"）
-5. 只返回命令名，不要描述"#;
+Your task is to extract subcommands and their descriptions from a CLI `--help` output text.
 
-    let user = format!("命令: {}\n\nHelp 输出:\n{}\n\n请列出所有子命令：", command, help_text);
+Rules:
+1. Only extract content under the "Commands:" section.
+2. Ignore "Options", "Usage", or any other sections.
+3. Each command may include aliases (e.g., "build, b"):
+   - Only keep the primary command (the first one before the comma).
+   - Discard all aliases.
+4. Ignore placeholder entries like "..." or lines without real commands.
+5. Trim extra whitespace.
+6. Do not invent commands. Only extract explicitly listed ones.
+7. Output must be valid JSON only. No explanations.
+
+Output format:
+[
+  {
+    "command": "<primary command>",
+    "description": "<description>"
+  }
+]
+
+If no commands are found, return an empty array: []
+    "#;
+
+    let user = format!(
+        "命令: {}\n\nHelp 输出:\n{}\n\n请列出所有子命令：",
+        command, help_text
+    );
 
     vec![
-        ChatMessage {
-            role: "system".to_string(),
-            content: system.to_string(),
-        },
-        ChatMessage {
-            role: "user".to_string(),
-            content: user,
-        },
+        ChatCompletionRequestSystemMessageArgs::default()
+            .content(system)
+            .build()
+            .unwrap()
+            .into(),
+        ChatCompletionRequestUserMessageArgs::default()
+            .content(user)
+            .build()
+            .unwrap()
+            .into(),
     ]
 }
 
-pub fn parse_subcommands_response(response: &str) -> Vec<String> {
+pub fn parse_subcommands_response(response: &str) -> Vec<SubcommandInfo> {
+    // Try to parse as JSON first (new format)
+    if let Ok(parsed) = serde_json::from_str::<Vec<SubcommandInfo>>(response.trim()) {
+        return parsed;
+    }
+
+    // Try to extract JSON from markdown code block
+    let trimmed = response.trim();
+    if let Some(start) = trimmed.find("```json") {
+        let after = &trimmed[start + 7..];
+        if let Some(end) = after.find("```") {
+            let json_str = after[..end].trim();
+            if let Ok(parsed) = serde_json::from_str::<Vec<SubcommandInfo>>(json_str) {
+                return parsed;
+            }
+        }
+    }
+
+    // Fallback: line-by-line parsing (no description available)
     let mut cmds = Vec::new();
     for line in response.lines() {
         let trimmed = line.trim();
@@ -40,13 +84,16 @@ pub fn parse_subcommands_response(response: &str) -> Vec<String> {
         }
         let cleaned = trimmed.trim_start_matches("- ").trim_start_matches("* ").trim();
         if !cleaned.is_empty() && !cleaned.contains(' ') {
-             cmds.push(cleaned.to_string());
+             cmds.push(SubcommandInfo {
+                 command: cleaned.to_string(),
+                 description: String::new(),
+             });
         }
     }
     cmds
 }
 
-pub fn build_toml_generation_prompt(command: &FlatCommand, json_schema: &str) -> Vec<ChatMessage> {
+pub fn build_toml_generation_prompt(command: &FlatCommand, json_schema: &str) -> Vec<ChatCompletionRequestMessage> {
     let system = format!(r#"你是一个 MCP tool 配置生成器。根据命令的 --help 输出，生成符合给定 JSON Schema 的 tool 配置。
 
 规则：
@@ -66,14 +113,16 @@ JSON Schema:
     let user = format!("命令: {}\n\nHelp 输出:\n{}\n\n请生成该命令的 tool 配置（TOML 格式）。", command.full_command.join(" "), command.help_text);
 
     vec![
-        ChatMessage {
-            role: "system".to_string(),
-            content: system,
-        },
-        ChatMessage {
-            role: "user".to_string(),
-            content: user,
-        },
+        ChatCompletionRequestSystemMessageArgs::default()
+            .content(system)
+            .build()
+            .unwrap()
+            .into(),
+        ChatCompletionRequestUserMessageArgs::default()
+            .content(user)
+            .build()
+            .unwrap()
+            .into(),
     ]
 }
 

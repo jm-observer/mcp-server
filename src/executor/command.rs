@@ -1,4 +1,4 @@
-use crate::config::RegisteredTool;
+use crate::config::{RegisteredTool, ToolAction};
 use crate::security::{validate_sub_dir, validate_working_dir, SecurityError};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -99,20 +99,25 @@ impl CommandExecutor {
         tool: &RegisteredTool,
         arguments: &HashMap<String, Value>,
     ) -> Result<CommandResult, CommandError> {
-        let t_cmd = tool.def.command.as_ref().ok_or(CommandError::MissingCommand)?;
-        
+        let (cmd_opt, args_opt, sub_dir_opt) = match &tool.def.action {
+            ToolAction::Command { command, args, sub_dir } => (command, args, sub_dir),
+            _ => return Err(CommandError::MissingCommand),
+        };
+
+        let t_cmd = cmd_opt.as_ref().ok_or(CommandError::MissingCommand)?;
+
         let mut work_dir = tool.working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-        
-        if let Some(sub_tpl) = &tool.def.sub_dir {
+
+        if let Some(sub_tpl) = sub_dir_opt {
             let sub_res = Self::resolve_template(sub_tpl, arguments)?;
             work_dir = validate_sub_dir(&work_dir, &sub_res)?;
         }
         validate_working_dir(&work_dir, &self.allowed_dirs)?;
 
         let cmd_exec = Self::resolve_template(t_cmd, arguments)?;
-        
+
         let mut resolved_args = Vec::new();
-        if let Some(t_args) = &tool.def.args {
+        if let Some(t_args) = args_opt {
             resolved_args = Self::resolve_args(t_args, arguments)?;
         }
 

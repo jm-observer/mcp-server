@@ -23,31 +23,38 @@ pub struct ToolFileConfig {
 pub struct ToolDef {
     pub name: String,
     pub description: String,
-    pub r#type: Option<ToolType>,
-    
-    // command 字段
-    pub command: Option<String>,
-    pub args: Option<Vec<String>>,
+    #[serde(flatten, default)]
+    pub action: ToolAction,
     pub env: Option<HashMap<String, String>>,
-    pub sub_dir: Option<String>,
-    
-    // http 字段
-    pub method: Option<String>,
-    pub path: Option<String>,
-    pub body: Option<String>,
-    pub content_type: Option<String>,
-    
-    // 通用
     pub timeout_secs: Option<u64>,
     #[serde(default)]
     pub parameters: Option<Vec<ParameterDef>>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolType {
-    Command,
-    Http,
+#[derive(Debug, Deserialize, Clone, PartialEq, JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ToolAction {
+    Command {
+        command: Option<String>,
+        args: Option<Vec<String>>,
+        sub_dir: Option<String>,
+    },
+    Http {
+        method: Option<String>,
+        path: Option<String>,
+        body: Option<String>,
+        content_type: Option<String>,
+    },
+}
+
+impl Default for ToolAction {
+    fn default() -> Self {
+        ToolAction::Command {
+            command: None,
+            args: None,
+            sub_dir: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, JsonSchema)]
@@ -124,13 +131,8 @@ impl ToolRegistry {
             let working_dir = file_config.working_dir.as_ref().map(PathBuf::from);
             let base_url = file_config.base_url.clone();
             
-            let mut final_def = def.clone();
-            if final_def.r#type.is_none() {
-                final_def.r#type = Some(ToolType::Command);
-            }
-
             let registered = RegisteredTool {
-                def: final_def,
+                def: def.clone(),
                 working_dir,
                 base_url,
                 effective_timeout: timeout,
@@ -163,15 +165,12 @@ impl ToolRegistry {
         let def = ToolDef {
             name: "direct_command".to_string(),
             description: "Execute an arbitrary shell command".to_string(),
-            r#type: Some(ToolType::Command),
-            command: None,
-            args: None,
+            action: ToolAction::Command {
+                command: None,
+                args: None,
+                sub_dir: None,
+            },
             env: None,
-            sub_dir: None,
-            method: None,
-            path: None,
-            body: None,
-            content_type: None,
             timeout_secs: None,
             parameters: Some(vec![
                 ParameterDef {

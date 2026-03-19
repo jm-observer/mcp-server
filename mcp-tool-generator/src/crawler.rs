@@ -83,7 +83,7 @@ impl<'a> HelpCrawler<'a> {
 
                     for sub in subcommands {
                         let mut sub_parts = command_parts.to_vec();
-                        sub_parts.push(sub);
+                        sub_parts.push(sub.command);
                         if let Ok(child_node) = self.crawl_recursive(&sub_parts, depth + 1).await {
                             node.children.push(child_node);
                         }
