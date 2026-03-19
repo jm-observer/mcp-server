@@ -3,7 +3,7 @@ use mcp_tool_generator::prompt;
 
 /// 测试完整流程：
 /// 1. 用模拟的 help 输出调用 build_subcommand_prompt -> LLM -> parse_subcommands_response
-/// 2. 对每个子命令模拟 help 输出，调用 build_toml_generation_prompt -> LLM -> parse_llm_response
+/// 2. 对每个子命令模拟 help 输出，调用 build_json_generation_prompt -> LLM -> parse_json_response
 /// 3. 合并输出最终 TOML 文件
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,11 +49,11 @@ async fn main() -> anyhow::Result<()> {
     //
     // println!("==> Step 2: 为命令生成 TOML 配置");
     // println!("==> 生成: {}", command);
-    // let toml_prompt = prompt::build_toml_generation_prompt(&main_cmd, &schema);
+    // let toml_prompt = prompt::build_json_generation_prompt(&main_cmd, &schema);
     // match llm.chat(toml_prompt).await {
     //     Ok(resp) => {
     //         println!("==> LLM 返回:\n{}\n", resp);
-    //         match prompt::parse_llm_response(&resp, main_cmd.full_command.clone()) {
+    //         match prompt::parse_json_response(&resp, main_cmd.full_command.clone()) {
     //             Ok(out) => tool_outputs.push(out),
     //             Err(e) => eprintln!("==> 解析失败: {}", e),
     //         }
@@ -78,11 +78,11 @@ async fn main() -> anyhow::Result<()> {
     //         help_text: sub_help,
     //     };
     //
-    //     let toml_prompt = prompt::build_toml_generation_prompt(&flat, &schema);
+    //     let toml_prompt = prompt::build_json_generation_prompt(&flat, &schema);
     //     match llm.chat(toml_prompt).await {
     //         Ok(resp) => {
     //             println!("==> LLM 返回:\n{}\n", resp);
-    //             match prompt::parse_llm_response(&resp, full_cmd) {
+    //             match prompt::parse_json_response(&resp, full_cmd) {
     //                 Ok(out) => tool_outputs.push(out),
     //                 Err(e) => eprintln!("==> 解析失败: {}", e),
     //             }

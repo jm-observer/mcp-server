@@ -2,12 +2,13 @@ use crate::protocol::McpHandler;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use log::error;
+use log::{error, info};
 
 pub async fn run_stdio(handler: Arc<McpHandler>) -> std::io::Result<()> {
     let stdin = tokio::io::stdin();
     let reader = BufReader::new(stdin);
     let mut lines = reader.lines();
+    info!("Starting stdio server...");
 
     // 建立一个响应发送通道，专用于将并发处理结果串行安全写入 stdout 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
@@ -32,13 +33,17 @@ pub async fn run_stdio(handler: Arc<McpHandler>) -> std::io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
+        info!("Received stdio request: {}", line);
         
         let handler_clone = handler.clone();
         let tx_clone = tx.clone();
         
         tokio::spawn(async move {
             if let Some(response) = handler_clone.handle_request(&line).await {
+                info!("Stdio handler produced response: {}", response);
                 let _ = tx_clone.send(response);
+            } else {
+                info!("Stdio handler produced no response for request");
             }
         });
     }

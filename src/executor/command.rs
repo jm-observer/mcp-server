@@ -366,6 +366,7 @@ mod tests {
                 env: None,
                 timeout_secs: None,
                 parameters: Some(parameters),
+                dangerous: false,
             },
             working_dir: None,
             base_url: None,

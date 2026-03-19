@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use log::debug;
+use log::{info, error};
 use serde_json::Value;
 use crate::config::{ServerConfig, ToolAction, ToolRegistry};
 use super::types::*;
@@ -40,7 +40,7 @@ impl McpHandler {
             };
             return Some(serde_json::to_string(&err_res).unwrap());
         }
-        debug!("{request}");
+        info!("Processing request: {}", req.method);
         let is_notification = req.id.is_none();
 
         let response = match req.method.as_str() {
@@ -150,6 +150,7 @@ impl McpHandler {
     }
 
     async fn handle_tools_call(&self, id: Value, params: Option<Value>) -> JsonRpcResponse {
+        info!("Calling tool with params: {:?}", params);
         let call_params: ToolCallParams = match params {
             Some(p) => match serde_json::from_value(p) {
                 Ok(p) => p,
@@ -170,13 +171,18 @@ impl McpHandler {
 
         let tool = match self.registry.get(&call_params.name) {
             Some(t) => t,
-            None => return JsonRpcResponse {
-                jsonrpc: "2.0".into(),
-                id: Some(id),
-                result: None,
-                error: Some(JsonRpcError::invalid_params(&format!("Tool not found: {}", call_params.name))),
-            },
+            None => {
+                error!("Tool not found: {}", call_params.name);
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: None,
+                    error: Some(JsonRpcError::invalid_params(&format!("Tool not found: {}", call_params.name))),
+                };
+            }
         };
+
+        info!("Tool matched: {}, action: {:?}", tool.def.name, tool.def.action);
 
         // Validate required params
         let provided_args = call_params.arguments.unwrap_or_default();

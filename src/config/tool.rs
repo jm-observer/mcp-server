@@ -11,7 +11,7 @@ pub struct ToolFile {
     pub tools: Vec<ToolDef>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct ToolFileConfig {
     pub working_dir: Option<String>,
     pub timeout_secs: Option<u64>,
@@ -29,6 +29,10 @@ pub struct ToolDef {
     pub timeout_secs: Option<u64>,
     #[serde(default)]
     pub parameters: Option<Vec<ParameterDef>>,
+    /// LLM 生成阶段标记：该工具是否有副作用。
+    /// 反序列化时缺失则默认 false，序列化到 TOML 时跳过。
+    #[serde(default, skip_serializing)]
+    pub dangerous: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
@@ -95,12 +99,7 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, file: ToolFile, global_timeout: u64) -> Result<(), ToolError> {
-        let file_config = file.config.unwrap_or_else(|| ToolFileConfig {
-            working_dir: None,
-            timeout_secs: None,
-            env: None,
-            base_url: None,
-        });
+        let file_config = file.config.unwrap_or_default();
 
         for def in file.tools {
             if self.tools.contains_key(&def.name) {
@@ -197,6 +196,7 @@ impl ToolRegistry {
                     arg: None,
                 },
             ]),
+            dangerous: false,
         };
 
         let registered = RegisteredTool {

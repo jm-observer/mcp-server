@@ -13,21 +13,26 @@ async fn main() -> anyhow::Result<()> {
 
     let llm = LlmClient::new("http://127.0.0.1:8082", "Intel/Qwen3.5-122B-A10B-int4-AutoRound");
     let schema = mcp_server::config::tool_config_schema();
-    println!("==> 命令: {} {schema}", cmd_str);
+    println!("==> Schema: {schema}");
     let flat = FlatCommand {
         full_command: full_command.clone(),
         help_text,
     };
 
-    println!("==> 正在调用 LLM 生成 TOML 配置...\n");
-    let toml_prompt = prompt::build_toml_generation_prompt(&flat, &schema);
-    let resp = llm.chat(toml_prompt).await?;
+    println!("==> 正在调用 LLM 生成 tool 定义（JSON）...\n");
+    let json_prompt = prompt::build_json_generation_prompt(&flat, &schema);
+    let resp = llm.chat(json_prompt).await?;
 
     println!("==> LLM 原始返回:\n{}\n", resp);
 
-    let tool_output = prompt::parse_llm_response(&resp, full_command)?;
+    let tool_output = prompt::parse_json_response(&resp, full_command)?;
+
+    println!("==> 解析得到 ToolDef: {:?}\n", tool_output.tool_def);
 
     let final_toml = toml_output::generate_toml_file(&cmd_str, &[tool_output]);
+    println!("==> 生成的 TOML:\n{}", final_toml);
+
     tokio::fs::write("./tools.d/cargo_build.toml", &final_toml).await?;
+    println!("==> 已保存到 ./tools.d/cargo_build.toml");
     Ok(())
 }

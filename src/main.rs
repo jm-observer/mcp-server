@@ -25,6 +25,7 @@ struct SessionQuery {
 async fn sse_connect(state: web::Data<AppState>) -> impl Responder {
     let (session_id, mut rx) = state.sessions.create_session();
     let endpoint_url = format!("/message?sessionId={}", session_id);
+    info!("New SSE connection created, session_id: {}", session_id);
 
     HttpResponse::Ok()
         .content_type("text/event-stream")
@@ -36,10 +37,12 @@ async fn sse_connect(state: web::Data<AppState>) -> impl Responder {
             );
 
             while let Some(message) = rx.recv().await {
+                info!("Forwarding message to session {}: {}", session_id, message);
                 yield Ok(
                     Bytes::from(format!("event: message\ndata: {}\n\n", message))
                 );
             }
+            info!("SSE session {} closed", session_id);
         })
 }
 
@@ -49,21 +52,29 @@ async fn handle_message(
     state: web::Data<AppState>,
 ) -> impl Responder {
     let session_id = &query.session_id;
+    let request = body.into_inner();
+    info!("Received message for session {}: {}", session_id, request);
 
     if !state.sessions.contains(session_id) {
+        error!("Session not found: {}", session_id);
         return HttpResponse::NotFound().json(json!({"error": "session not found"}));
     }
 
-    let request_str = serde_json::to_string(&body.into_inner()).unwrap();
+    let request_str = serde_json::to_string(&request).unwrap();
 
     match state.handler.handle_request(&request_str).await {
         Some(response) => {
-            if let Err(_) = state.sessions.send(session_id, response) {
+            info!("Handler produced response for session {}: {}", session_id, response);
+            if let Err(e) = state.sessions.send(session_id, response) {
+                error!("Failed to send response to session {}: {}", session_id, e);
                 return HttpResponse::Gone().json(json!({"error": "session closed"}));
             }
             HttpResponse::Accepted().finish()
         }
-        None => HttpResponse::Accepted().finish(),
+        None => {
+            info!("Handler produced no response for session {}", session_id);
+            HttpResponse::Accepted().finish()
+        },
     }
 }
 

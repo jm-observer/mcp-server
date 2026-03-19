@@ -3,6 +3,7 @@ use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
     ChatCompletionRequestUserMessageArgs,
 };
+use mcp_server::config::tool::ToolDef;
 
 pub fn build_subcommand_prompt(command: &str, help_text: &str) -> Vec<ChatCompletionRequestMessage> {
     let system = r#"
@@ -19,7 +20,7 @@ Rules:
 4. Ignore placeholder entries like "..." or lines without real commands.
 5. Trim extra whitespace.
 6. Do not invent commands. Only extract explicitly listed ones.
-7. Output must be valid JSON only. No explanations.
+7. Output must be a valid JSON array of objects. No explanations.
 
 Output format:
 [
@@ -93,24 +94,62 @@ pub fn parse_subcommands_response(response: &str) -> Vec<SubcommandInfo> {
     cmds
 }
 
-pub fn build_toml_generation_prompt(command: &FlatCommand, json_schema: &str) -> Vec<ChatCompletionRequestMessage> {
-    let system = format!(r#"你是一个 MCP tool 配置生成器。根据命令的 --help 输出，生成符合给定 JSON Schema 的 tool 配置。
+pub fn build_json_generation_prompt(command: &FlatCommand, json_schema: &str) -> Vec<ChatCompletionRequestMessage> {
+    let system = format!(r#"You are an MCP tool configuration generator.
+Given a CLI command’s --help output, generate a single tool definition that strictly conforms to the provided JSON Schema.
 
-规则：
-1. 为命令生成一个 [[tools]] 配置块（TOML 格式）
-2. 从 help 文本中提取参数，定义为 [[tools.parameters]]
-3. 使用 ${{var}} 占位符引用参数
-4. 判断命令安全性：
-   - safe: 只读操作、查询、显示信息
-   - dangerous: 删除、修改、写入、发送、部署等有副作用的操作
-5. 对 dangerous 命令，在 TOML 前加 # DANGEROUS 注释
+# Output Requirements
 
+Output exactly one JSON object.
+
+Do NOT output TOML, explanations, markdown, or any extra text.
+
+The output must strictly conform to the JSON Schema.
+
+The object represents one tool only (NOT a full ToolFile).
+
+# Extraction Rules
+
+Extract all CLI parameters from the help text and place them into the parameters array.
+
+Fixed parts of the command must be placed in:
+
+action.command
+
+action.args
+
+Optional arguments MUST be represented via parameters[*].arg.
+
+Do NOT hardcode optional flags or values into action.args.
+
+Do NOT invent parameters that are not explicitly present in the help text.
+
+If information is missing or unclear, use the minimal valid value required by the schema.
+
+# Dangerous Flag Classification
+
+Determine whether the command is dangerous and set the "dangerous" field accordingly:
+
+false: read-only or safe operations (e.g., query, list, read, preview, validate, dry-run, help, version)
+
+true: mutating or side-effect operations (e.g., delete, update, write, commit, send, deploy, install, publish, run, execute)
+
+# Strictness Rules
+
+The output must be valid JSON and fully compliant with the schema.
+
+Do NOT include comments, trailing commas, or additional fields not defined in the schema.
+
+# JSON Schema
 JSON Schema:
-<schema>
 {}
-</schema>"#, json_schema);
+"#, json_schema);
 
-    let user = format!("命令: {}\n\nHelp 输出:\n{}\n\n请生成该命令的 tool 配置（TOML 格式）。", command.full_command.join(" "), command.help_text);
+    let user = format!(
+        "命令: {}\n\nHelp 输出:\n{}\n\n请生成该命令对应的单个 tool 定义（JSON）。",
+        command.full_command.join(" "),
+        command.help_text
+    );
 
     vec![
         ChatCompletionRequestSystemMessageArgs::default()
@@ -126,26 +165,136 @@ JSON Schema:
     ]
 }
 
-pub fn parse_llm_response(response: &str, command: Vec<String>) -> anyhow::Result<ToolOutput> {
-    // 提取 TOML 块
-    let toml_block = if let Some(start) = response.find("```toml\n") {
-        let after_start = &response[start + 8..];
-        if let Some(end) = after_start.find("```") {
-            after_start[..end].to_string()
-        } else {
-            after_start.to_string()
+/// 从 LLM 响应文本中提取 JSON 字符串。
+///
+/// 优先级：
+/// 1. ```json ... ``` 代码块
+/// 2. 整段响应直接作为 JSON
+/// 3. 第一个 `{` 到最后一个 `}` 的截取
+fn extract_json(response: &str) -> anyhow::Result<&str> {
+    let trimmed = response.trim();
+
+    // 1. 提取 ```json ... ``` 代码块
+    if let Some(start) = trimmed.find("```json") {
+        let after = &trimmed[start + 7..];
+        if let Some(end) = after.find("```") {
+            let json_str = after[..end].trim();
+            if !json_str.is_empty() {
+                return Ok(json_str);
+            }
         }
-    } else if let Some(start) = response.find(r#"[[tools]]"#) {
-        response[start..].to_string()
-    } else {
-        response.to_string()
-    };
+    }
 
-    let is_dangerous = response.contains("# DANGEROUS") || response.contains("dangerous") || response.contains("DANGEROUS");
+    // 2. 整段响应直接作为 JSON
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Ok(trimmed);
+    }
 
-    Ok(ToolOutput {
-        toml_block: toml_block.trim().to_string(),
-        is_dangerous,
-        command,
-    })
+    // 3. 第一个 `{` 到最后一个 `}` 的截取
+    if let Some(start) = trimmed.find('{') {
+        if let Some(end) = trimmed.rfind('}') {
+            if end > start {
+                return Ok(&trimmed[start..=end]);
+            }
+        }
+    }
+
+    anyhow::bail!("无法从 LLM 响应中提取 JSON 对象:\n{}", trimmed)
+}
+
+/// 从 LLM 响应中提取 JSON 并反序列化为 ToolDef。
+pub fn parse_json_response(response: &str, command: Vec<String>) -> anyhow::Result<ToolOutput> {
+    let json_str = extract_json(response)?;
+    let tool_def: ToolDef = serde_json::from_str(json_str)
+        .map_err(|e| anyhow::anyhow!("JSON 反序列化为 ToolDef 失败: {}\nJSON 内容:\n{}", e, json_str))?;
+    Ok(ToolOutput { tool_def, command })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_json_from_code_block() {
+        let response = r#"这是一些解释文字
+
+```json
+{"name": "test", "description": "a test tool", "type": "command", "command": "echo", "args": ["hello"]}
+```
+
+以上是生成结果。"#;
+        let json_str = extract_json(response).unwrap();
+        let tool_def: ToolDef = serde_json::from_str(json_str).unwrap();
+        assert_eq!(tool_def.name, "test");
+    }
+
+    #[test]
+    fn test_extract_json_bare() {
+        let response = r#"{"name": "test", "description": "desc", "type": "command", "command": "ls"}"#;
+        let json_str = extract_json(response).unwrap();
+        let tool_def: ToolDef = serde_json::from_str(json_str).unwrap();
+        assert_eq!(tool_def.name, "test");
+    }
+
+    #[test]
+    fn test_extract_json_with_surrounding_text() {
+        let response = r#"Here is the tool definition:
+{"name": "cargo_build", "description": "Build a cargo project", "type": "command", "command": "cargo", "args": ["build"]}
+Hope this helps!"#;
+        let json_str = extract_json(response).unwrap();
+        let tool_def: ToolDef = serde_json::from_str(json_str).unwrap();
+        assert_eq!(tool_def.name, "cargo_build");
+    }
+
+    #[test]
+    fn test_extract_json_no_json() {
+        let response = "This response has no JSON at all.";
+        assert!(extract_json(response).is_err());
+    }
+
+    #[test]
+    fn test_parse_json_response_with_dangerous() {
+        let response = r#"{"name": "clean", "description": "Clean build artifacts", "type": "command", "command": "cargo", "args": ["clean"], "dangerous": true}"#;
+        let output = parse_json_response(response, vec!["cargo".into(), "clean".into()]).unwrap();
+        assert!(output.tool_def.dangerous);
+        assert_eq!(output.command, vec!["cargo", "clean"]);
+    }
+
+    #[test]
+    fn test_parse_json_response_dangerous_defaults_false() {
+        let response = r#"{"name": "status", "description": "Show status", "type": "command", "command": "git", "args": ["status"]}"#;
+        let output = parse_json_response(response, vec!["git".into(), "status".into()]).unwrap();
+        assert!(!output.tool_def.dangerous);
+    }
+
+    #[test]
+    fn test_parse_json_response_missing_required_field() {
+        let response = r#"{"description": "no name field", "type": "command"}"#;
+        assert!(parse_json_response(response, vec!["test".into()]).is_err());
+    }
+
+    #[test]
+    fn test_parse_json_response_with_parameters() {
+        let response = r#"{
+            "name": "cargo_build",
+            "description": "Build a cargo project",
+            "type": "command",
+            "command": "cargo",
+            "args": ["build"],
+            "parameters": [
+                {
+                    "name": "package",
+                    "description": "Package to build",
+                    "type": "string",
+                    "required": false,
+                    "arg": ["-p", "${package}"]
+                }
+            ]
+        }"#;
+        let output = parse_json_response(response, vec!["cargo".into(), "build".into()]).unwrap();
+        let params = output.tool_def.parameters.unwrap();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "package");
+        assert_eq!(params[0].arg.as_ref().unwrap(), &vec!["-p".to_string(), "${package}".to_string()]);
+    }
 }

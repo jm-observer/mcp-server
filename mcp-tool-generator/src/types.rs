@@ -1,3 +1,5 @@
+use mcp_server::config::tool::ToolDef;
+
 #[derive(Debug, Clone)]
 pub struct CommandHelp {
     pub full_command: Vec<String>,
@@ -19,7 +21,6 @@ pub struct SubcommandInfo {
 
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
-    pub toml_block: String,
-    pub is_dangerous: bool,
+    pub tool_def: ToolDef,
     pub command: Vec<String>,
 }

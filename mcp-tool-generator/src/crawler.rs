@@ -63,7 +63,8 @@ impl<'a> HelpCrawler<'a> {
         };
 
         if help_text.trim().is_empty() {
-            return Err(anyhow!("Empty help output"));
+            log::warn!("Command {} {} returned empty output", cmd, args.join(" "));
+            return Err(anyhow!("Empty help output for {} {}", cmd, args.join(" ")));
         }
 
         let mut node = CommandHelp {

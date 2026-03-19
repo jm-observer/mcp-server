@@ -60,14 +60,14 @@ async fn main() -> Result<()> {
     // 4. Get JSON Schema for tool definitions
     let schema = client.get_tool_schema();
 
-    // 5. Generate TOML for each command using LLM
+    // 5. Generate tool definitions for each command using LLM (JSON -> ToolDef)
     let mut tool_outputs = Vec::new();
     for cmd in flat_commands {
-        log::info!("Generating TOML for: {}", cmd.full_command.join(" "));
-        let prompt = prompt::build_toml_generation_prompt(&cmd, &schema);
+        log::info!("Generating tool definition for: {}", cmd.full_command.join(" "));
+        let prompt = prompt::build_json_generation_prompt(&cmd, &schema);
         match llm.chat(prompt).await {
             Ok(resp) => {
-                match prompt::parse_llm_response(&resp, cmd.full_command.clone()) {
+                match prompt::parse_json_response(&resp, cmd.full_command.clone()) {
                     Ok(out) => tool_outputs.push(out),
                     Err(e) => log::error!("Failed to parse LLM response for {}: {}", cmd.full_command.join(" "), e),
                 }
