@@ -99,6 +99,73 @@ executor 在构建最终命令时：
    - 其他类型：对 `arg` 中每个元素做 `resolve_template` 替换后追加
 3. **合并**：固定部分 + 动态部分 = 最终参数列表
 
+### 顺序语义
+
+动态参数的拼接顺序**不以 client 传参顺序为准**，而以 TOML 中 `[[tools.parameters]]` 的声明顺序为准。
+
+也就是说，executor 遍历 `tool.def.parameters` 时，哪个 parameter 定义在前，它的 `arg` 就先拼接。这样可以保证最终 CLI 顺序稳定、可预期，也便于通过配置文件显式控制参数顺序。
+
+例如：
+
+```toml
+[[tools.parameters]]
+name = "package"
+arg = ["-p", "${package}"]
+
+[[tools.parameters]]
+name = "bin"
+arg = ["--bin", "${bin}"]
+```
+
+即使 client 的 JSON 中写成：
+
+```json
+{
+  "bin": "a",
+  "package": "b"
+}
+```
+
+最终仍然拼成：
+
+```bash
+cargo build -p b --bin a
+```
+
+### 类型边界
+
+本 Goal 的 `arg` 映射**首期只明确支持 simple value**：
+
+- `string`
+- `number`（通过现有 `resolve_template` 的 `Value::Number` 分支）
+- `boolean`
+
+对于 `array` / `object` 等复杂类型，当前 `resolve_template` 会返回错误：
+
+```rust
+_ => return Err(CommandError::TemplateResolution(
+    format!("Variable {} is not a simple value", var_name)
+)),
+```
+
+因此本 Goal **不定义 array 类型的 `arg` 展开语义**。若后续需要支持如 `--feature a --feature b` 或 `["a", "b"] -> "a,b"` 的映射，应另开 Goal 明确设计。
+
+### 缺失变量的边界行为
+
+当前模板替换存在两类行为，需在设计上明确区分：
+
+1. **独占整个元素的变量**，如 `"${bin}"`  
+   在 `resolve_args` 中，如果参数未提供，则该元素会被整个跳过。
+2. **内嵌变量**，如 `"--flag=${value}"`  
+   在 `resolve_template` 中，如果参数未提供，则会被替换为空字符串，而不是报错。
+
+因此：
+
+- `arg = ["--bin", "${bin}"]` + 未传 `bin`：整个 parameter 不参与拼接
+- `arg = ["--flag=${value}"]` + 未传 `value`：若代码路径仍走到 `resolve_template`，结果会变成 `--flag=`
+
+为避免语义含糊，建议在配置约定中优先使用**flag/value 分离**的写法，即 `["--bin", "${bin}"]`，避免依赖内嵌缺失变量的空串行为。
+
 ### TOML 配置示例
 
 以在项目 `mcp-server` 下执行 `cargo build --bin a -p b --features f1,f2 --release` 为例：
@@ -296,6 +363,19 @@ pub arg: Option<Vec<String>>,
 
 已有 `Serialize` derive（Goal 12 前置修改中已添加），无需额外改动。
 
+此外，所有手写的 `ParameterDef { ... }` struct literal 都需要同步补上：
+
+```rust
+arg: None,
+```
+
+至少包括：
+
+- `register_builtin_direct_command` 中的 3 个内建参数
+- `mcp-tool-generator/src/bin/extract_tool_action_by_llm.rs` 中构造 `ParameterDef` 的逻辑
+
+否则新增字段后会直接编译失败。
+
 ### 2. `src/executor/command.rs`
 
 在 `execute` 方法中，现有的固定 args resolve 之后，插入动态参数拼接逻辑：
@@ -328,21 +408,43 @@ if let Some(params) = &tool.def.parameters {
 }
 ```
 
+这里的遍历顺序应保留 `tool.def.parameters` 原始顺序，使动态参数拼接顺序与 TOML 声明顺序一致。
+
 ### 3. `tools.d/cargo_build.toml`
 
 按上文「TOML 配置示例」部分的内容更新，取消注释，使用 `arg` 字段定义每个参数的 CLI 映射。
+
+### 4. `mcp-tool-generator/src/bin/deserialize_tool_toml.rs`
+
+若完成标准要求“读取并展示 `arg` 字段”，则打印逻辑也要同步更新。例如在遍历 parameters 时补充输出：
+
+```rust
+println!(
+    "    - {} ({}): {} [required={}, arg={:?}]",
+    p.name, p.r#type, p.description, p.required, p.arg
+);
+```
+
+否则该工具虽然能反序列化成功，但无法证明 `arg` 已被正确展示。
 
 ## 向后兼容
 
 - `arg` 字段为 `Option`，默认 `None`，不影响已有的 tool 配置文件
 - 已有的 `args` 内联模板机制（如 `["clone", "${repo_url}"]`）保持不变，二者可共存
 - 只有定义了 `arg` 的参数才会参与动态拼接
+- `array` 类型参数的既有定义不会因新增字段失效，但在本 Goal 中仍不应配置 `arg`，除非后续单独定义其展开规则
 
 ## 完成标准
 
 - [ ] `ParameterDef` 增加 `arg: Option<Vec<String>>` 字段
+- [ ] 所有现有 `ParameterDef { ... }` 初始化点同步补上 `arg: None`，项目可编译
 - [ ] `CommandExecutor::execute` 支持动态参数拼接
+- [ ] 动态参数拼接顺序以 `[[tools.parameters]]` 声明顺序为准
 - [ ] `tools.d/cargo_build.toml` 使用新格式定义
 - [ ] `cargo build` 编译通过
 - [ ] `deserialize_tool_toml` 能正确读取并展示 `arg` 字段
+- [ ] 单元/集成验证：可选 string 未传时，flag/value 成对消失，不残留裸 flag
+- [ ] 单元/集成验证：boolean 参数仅在 `true` 时拼接，`false` 或缺失时跳过
+- [ ] 单元/集成验证：`arg = None` 的参数可被 `sub_dir` 等 executor 逻辑消费，但不进入最终 CLI
+- [ ] 单元/集成验证：`array` 类型若误用于 `arg` 模板，行为符合当前设计预期（至少需有明确限制或错误表现）
 - [ ] 端到端验证：MCP client 传入参数后，executor 生成正确的命令

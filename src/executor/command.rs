@@ -94,13 +94,52 @@ impl CommandExecutor {
         Ok(resolved)
     }
 
+    fn resolve_parameter_args(
+        tool: &RegisteredTool,
+        arguments: &HashMap<String, Value>,
+    ) -> Result<Vec<String>, CommandError> {
+        let mut resolved_args = Vec::new();
+
+        if let Some(t_args) = match &tool.def.action {
+            ToolAction::Command { args, .. } => args.as_ref(),
+            _ => None,
+        } {
+            resolved_args = Self::resolve_args(t_args, arguments)?;
+        }
+
+        if let Some(params) = &tool.def.parameters {
+            for param in params {
+                let Some(arg_templates) = &param.arg else {
+                    continue;
+                };
+                let Some(value) = arguments.get(&param.name) else {
+                    continue;
+                };
+
+                if param.r#type == "boolean" {
+                    if value.as_bool().unwrap_or(false) {
+                        resolved_args.extend(arg_templates.iter().cloned());
+                    }
+                    continue;
+                }
+
+                let resolved = Self::resolve_args(arg_templates, arguments)?;
+                resolved_args.extend(resolved);
+            }
+        }
+
+        Ok(resolved_args)
+    }
+
     pub async fn execute(
         &self,
         tool: &RegisteredTool,
         arguments: &HashMap<String, Value>,
     ) -> Result<CommandResult, CommandError> {
-        let (cmd_opt, args_opt, sub_dir_opt) = match &tool.def.action {
-            ToolAction::Command { command, args, sub_dir } => (command, args, sub_dir),
+        let (cmd_opt, sub_dir_opt) = match &tool.def.action {
+            ToolAction::Command {
+                command, sub_dir, ..
+            } => (command, sub_dir),
             _ => return Err(CommandError::MissingCommand),
         };
 
@@ -115,11 +154,7 @@ impl CommandExecutor {
         validate_working_dir(&work_dir, &self.allowed_dirs)?;
 
         let cmd_exec = Self::resolve_template(t_cmd, arguments)?;
-
-        let mut resolved_args = Vec::new();
-        if let Some(t_args) = args_opt {
-            resolved_args = Self::resolve_args(t_args, arguments)?;
-        }
+        let resolved_args = Self::resolve_parameter_args(tool, arguments)?;
 
         let mut child_cmd = Command::new(cmd_exec);
         child_cmd.args(resolved_args)
@@ -308,5 +343,142 @@ impl CommandExecutor {
                 Err(CommandError::Timeout)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CommandExecutor;
+    use crate::config::{ParameterDef, RegisteredTool, ToolAction, ToolDef};
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    fn sample_tool(parameters: Vec<ParameterDef>) -> RegisteredTool {
+        RegisteredTool {
+            def: ToolDef {
+                name: "cargo_build".to_string(),
+                description: "Build cargo project".to_string(),
+                action: ToolAction::Command {
+                    command: Some("cargo".to_string()),
+                    args: Some(vec!["build".to_string()]),
+                    sub_dir: Some("${project}".to_string()),
+                },
+                env: None,
+                timeout_secs: None,
+                parameters: Some(parameters),
+            },
+            working_dir: None,
+            base_url: None,
+            effective_timeout: 60,
+            env: HashMap::new(),
+        }
+    }
+
+    fn string_param(name: &str, arg: &[&str]) -> ParameterDef {
+        ParameterDef {
+            name: name.to_string(),
+            description: name.to_string(),
+            r#type: "string".to_string(),
+            required: false,
+            arg: Some(arg.iter().map(|item| (*item).to_string()).collect()),
+        }
+    }
+
+    fn boolean_param(name: &str, arg: &[&str]) -> ParameterDef {
+        ParameterDef {
+            name: name.to_string(),
+            description: name.to_string(),
+            r#type: "boolean".to_string(),
+            required: false,
+            arg: Some(arg.iter().map(|item| (*item).to_string()).collect()),
+        }
+    }
+
+    fn metadata_param(name: &str) -> ParameterDef {
+        ParameterDef {
+            name: name.to_string(),
+            description: name.to_string(),
+            r#type: "string".to_string(),
+            required: false,
+            arg: None,
+        }
+    }
+
+    fn args_map(entries: &[(&str, Value)]) -> HashMap<String, Value> {
+        entries
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn appends_dynamic_args_in_parameter_declaration_order() {
+        let tool = sample_tool(vec![
+            string_param("package", &["-p", "${package}"]),
+            string_param("bin", &["--bin", "${bin}"]),
+        ]);
+        let arguments = args_map(&[
+            ("bin", json!("demo-bin")),
+            ("package", json!("demo-pkg")),
+        ]);
+
+        let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
+
+        assert_eq!(resolved, vec!["build", "-p", "demo-pkg", "--bin", "demo-bin"]);
+    }
+
+    #[test]
+    fn skips_optional_flag_value_pair_when_string_arg_missing() {
+        let tool = sample_tool(vec![string_param("bin", &["--bin", "${bin}"])]);
+        let arguments = args_map(&[]);
+
+        let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
+
+        assert_eq!(resolved, vec!["build"]);
+    }
+
+    #[test]
+    fn only_appends_boolean_args_when_true() {
+        let tool = sample_tool(vec![boolean_param("release", &["--release"])]);
+
+        let enabled = CommandExecutor::resolve_parameter_args(
+            &tool,
+            &args_map(&[("release", json!(true))]),
+        )
+        .unwrap();
+        let disabled = CommandExecutor::resolve_parameter_args(
+            &tool,
+            &args_map(&[("release", json!(false))]),
+        )
+        .unwrap();
+
+        assert_eq!(enabled, vec!["build", "--release"]);
+        assert_eq!(disabled, vec!["build"]);
+    }
+
+    #[test]
+    fn metadata_parameters_do_not_affect_cli_args() {
+        let tool = sample_tool(vec![
+            metadata_param("project"),
+            string_param("package", &["-p", "${package}"]),
+        ]);
+        let arguments = args_map(&[
+            ("project", json!("mcp-server")),
+            ("package", json!("demo-pkg")),
+        ]);
+
+        let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
+
+        assert_eq!(resolved, vec!["build", "-p", "demo-pkg"]);
+    }
+
+    #[test]
+    fn rejects_complex_values_used_in_arg_templates() {
+        let tool = sample_tool(vec![string_param("items", &["--items", "${items}"])]);
+        let arguments = args_map(&[("items", json!(["a", "b"]))]);
+
+        let err = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap_err();
+
+        assert!(matches!(err, crate::executor::command::CommandError::TemplateResolution(_)));
     }
 }

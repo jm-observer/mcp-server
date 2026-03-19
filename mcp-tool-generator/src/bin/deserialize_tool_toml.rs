@@ -44,7 +44,10 @@ async fn main() -> anyhow::Result<()> {
         if let Some(params) = &tool.parameters {
             println!("  parameters ({}):", params.len());
             for p in params {
-                println!("    - {} ({}): {} [required={}]", p.name, p.r#type, p.description, p.required);
+                println!(
+                    "    - {} ({}): {} [required={}, arg={:?}]",
+                    p.name, p.r#type, p.description, p.required, p.arg
+                );
             }
         }
         println!();

@@ -1,5 +1,5 @@
 [config]
-working_dir = "/data/repos"    # 项目根目录的父目录（需在 allowed_dirs 白名单内）
+working_dir = "D:\\git"    # 项目根目录的父目录（需在 allowed_dirs 白名单内）
 
 [[tools]]
 name = "cargo_build"

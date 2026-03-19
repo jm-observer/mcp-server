@@ -64,6 +64,8 @@ pub struct ParameterDef {
     pub r#type: String,
     #[serde(default)]
     pub required: bool,
+    #[serde(default)]
+    pub arg: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -178,18 +180,21 @@ impl ToolRegistry {
                     description: "要执行的命令".to_string(),
                     r#type: "string".to_string(),
                     required: true,
+                    arg: None,
                 },
                 ParameterDef {
                     name: "args".to_string(),
                     description: "命令参数".to_string(),
                     r#type: "array".to_string(),
                     required: false,
+                    arg: None,
                 },
                 ParameterDef {
                     name: "working_dir".to_string(),
                     description: "工作目录".to_string(),
                     r#type: "string".to_string(),
                     required: false,
+                    arg: None,
                 },
             ]),
         };

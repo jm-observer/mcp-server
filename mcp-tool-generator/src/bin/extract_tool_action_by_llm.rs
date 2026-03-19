@@ -88,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
                         description: p["description"].as_str().unwrap_or("").to_string(),
                         r#type: p["type"].as_str().unwrap_or("string").to_string(),
                         required: p["required"].as_bool().unwrap_or(false),
+                        arg: None,
                     })
                 })
                 .collect()
