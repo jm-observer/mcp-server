@@ -305,5 +305,24 @@ impl ToolRegistry {
             env: HashMap::new(),
         };
         self.tools.insert("write_file".to_string(), write_file);
+
+        // list_allowed_dirs
+        let list_allowed_dirs = RegisteredTool {
+            def: ToolDef {
+                name: "list_allowed_dirs".to_string(),
+                description: "List all allowed directories that this server can access. Use this to discover which directories are available for file operations.".to_string(),
+                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                env: None,
+                timeout_secs: None,
+                cwd: false,
+                parameters: None,
+                dangerous: false,
+            },
+            working_dir: None,
+            base_url: None,
+            effective_timeout: 60,
+            env: HashMap::new(),
+        };
+        self.tools.insert("list_allowed_dirs".to_string(), list_allowed_dirs);
     }
 }

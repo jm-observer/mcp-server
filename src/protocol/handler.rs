@@ -220,6 +220,7 @@ impl McpHandler {
 
         // 内置文件操作 tool 分发
         match call_params.name.as_str() {
+            "list_allowed_dirs" => return self.handle_builtin_list_allowed_dirs(id),
             "list_dir" => return self.handle_builtin_list_dir(id, &provided_args).await,
             "read_file" => return self.handle_builtin_read_file(id, &provided_args).await,
             "write_file" => return self.handle_builtin_write_file(id, &provided_args).await,
@@ -401,6 +402,24 @@ impl McpHandler {
             id,
             vec![ContentBlock { r#type: "text".into(), text: msg }],
             Some(true),
+        )
+    }
+
+    fn handle_builtin_list_allowed_dirs(&self, id: Value) -> JsonRpcResponse {
+        let dirs = &self.server_config.defaults.allowed_dirs;
+        let text = if dirs.is_empty() {
+            "(no allowed directories configured)".to_string()
+        } else {
+            dirs.iter()
+                .map(|d| d.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        Self::make_tool_result(
+            id,
+            vec![ContentBlock { r#type: "text".into(), text }],
+            None,
         )
     }
 
