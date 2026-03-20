@@ -27,7 +27,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 2. 获取工具列表
     list_available_tools(&client, &post_url, &mut stream).await?;
 
-    // 3. 调用具体工具
+    // 3. 获取资源列表
+    list_available_resources(&client, &post_url, &mut stream).await?;
+
+    // 4. 调用具体工具
     call_tool(&client, &post_url, &mut stream).await?;
 
     Ok(())
@@ -113,7 +116,6 @@ async fn list_available_tools(
             if line.starts_with("data: ") {
                 let data = &line["data: ".len()..];
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                    // 检查是否为工具列表响应
                     if let Some(result) = json.get("result") {
                         println!("========================================");
                         println!("         可用工具列表");
@@ -135,7 +137,6 @@ async fn list_available_tools(
                                 println!("{}. {}", index + 1, name);
                                 println!("   描述：{}", description);
 
-                                // 显示参数信息
                                 if let Some(schema) =
                                     tool.get("inputSchema").and_then(|s| s.as_object())
                                 {
@@ -177,6 +178,83 @@ async fn list_available_tools(
     Err("未收到工具列表响应".into())
 }
 
+/// 获取并显示可用资源列表
+async fn list_available_resources(
+    client: &Client,
+    post_url: &str,
+    stream: &mut ByteStream,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("----------------------------------------");
+    println!("正在获取可用资源列表...");
+
+    let request_id = 2;
+    let list_request = json!({
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "resources/list",
+        "params": {}
+    });
+
+    client.post(post_url).json(&list_request).send().await?;
+    println!("请求已发送，等待结果...\n");
+
+    // 等待并显示结果
+    let mut stream = Box::pin(stream);
+    while let Some(item) = stream.as_mut().next().await {
+        let chunk = item?;
+        let text = String::from_utf8_lossy(&chunk);
+
+        for line in text.lines() {
+            if line.starts_with("data: ") {
+                let data = &line["data: ".len()..];
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(result) = json.get("result") {
+                        println!("========================================");
+                        println!("         可用资源列表");
+                        println!("========================================\n");
+
+                        if let Some(resources) = result.get("resources").and_then(|r| r.as_array())
+                        {
+                            println!("共找到 {} 个可用资源:\n", resources.len());
+
+                            for (index, resource) in resources.iter().enumerate() {
+                                let uri = resource
+                                    .get("uri")
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or("unknown");
+                                let name = resource
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("无名称");
+                                let description = resource
+                                    .get("description")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("无描述");
+                                let mime_type = resource
+                                    .get("mimeType")
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or("未指定");
+
+                                println!("{}. {}", index + 1, name);
+                                println!("   URI: {}", uri);
+                                println!("   描述：{}", description);
+                                println!("   MIME 类型：{}", mime_type);
+                                println!();
+                            }
+                        } else {
+                            println!("资源列表响应：{:#}", result);
+                        }
+                        println!();
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    Err("未收到资源列表响应".into())
+}
+
 /// 调用指定工具
 async fn call_tool(
     client: &Client,
@@ -186,7 +264,7 @@ async fn call_tool(
     println!("----------------------------------------");
     println!("正在调用工具...");
 
-    let request_id = 2;
+    let request_id = 3;
     let tool_request = json!({
         "jsonrpc": "2.0",
         "id": request_id,
@@ -207,7 +285,6 @@ async fn call_tool(
 
     println!("请求已发送，正在等待结果...\n");
 
-    // 等待执行结果
     let mut stream = Box::pin(stream);
     while let Some(item) = stream.as_mut().next().await {
         let chunk = item?;
@@ -221,7 +298,6 @@ async fn call_tool(
                     println!("           执行结果");
                     println!("========================================\n");
 
-                    // 检查是否有错误
                     if let Some(error) = json.get("error") {
                         eprintln!("执行失败:\n{}", serde_json::to_string_pretty(error)?);
                     } else if let Some(result) = json.get("result") {
@@ -239,3 +315,4 @@ async fn call_tool(
 
     Err("未收到工具执行结果".into())
 }
+

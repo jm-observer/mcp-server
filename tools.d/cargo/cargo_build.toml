@@ -1,5 +1,5 @@
 [[tools]]
-name = "cargo_build"
+name = "cargo_build_origin"
 description = "Compile a local package and all of its dependencies"
 type = "command"
 command = "cargo"

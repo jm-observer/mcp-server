@@ -21,8 +21,8 @@ pub struct GeneratorConfig {
     #[arg()]
     pub command_name: String,
 
-    #[arg(short, long)]
-    pub output_path: Option<String>,
+    #[arg(short, long, default_value = "tools.d")]
+    pub output_dir: String,
 }
 
 impl GeneratorConfig {

@@ -3,18 +3,12 @@
 
 # DANGEROUS: This command may have side effects
 [[tools]]
-name = "cargo_build_llm"
+name = "cargo_build"
 description = "Compile a local package and all of its dependencies"
 type = "command"
 command = "cargo"
 args = ["build"]
 cwd = true
-
-#[[tools.parameters]]
-#name = "cwd"
-#description = "Working directory (absolute path)"
-#type = "string"
-#required = true
 
 [[tools.parameters]]
 name = "future_incompat_report"
@@ -139,7 +133,7 @@ arg = ["--example"]
 
 [[tools.parameters]]
 name = "tests"
-description = "Build all targets that have `test = true` set"
+description = "Build all targets that have test = true set"
 type = "boolean"
 required = false
 arg = ["--tests"]
@@ -153,7 +147,7 @@ arg = ["--test"]
 
 [[tools.parameters]]
 name = "benches"
-description = "Build all targets that have `bench = true` set"
+description = "Build all targets that have bench = true set"
 type = "boolean"
 required = false
 arg = ["--benches"]
@@ -191,7 +185,7 @@ arg = ["--all-features"]
 
 [[tools.parameters]]
 name = "no_default_features"
-description = "Do not activate the `default` feature"
+description = "Do not activate the default feature"
 type = "boolean"
 required = false
 arg = ["--no-default-features"]
@@ -215,8 +209,8 @@ arg = ["--profile"]
 
 [[tools.parameters]]
 name = "jobs"
-description = "Number of parallel jobs, defaults to # of CPUs."
-type = "integer"
+description = "Number of parallel jobs, defaults to # of CPUs"
+type = "string"
 required = false
 arg = [
     "-j",
@@ -281,14 +275,14 @@ arg = ["--lockfile-path"]
 
 [[tools.parameters]]
 name = "ignore_rust_version"
-description = "Ignore `rust-version` specification in packages"
+description = "Ignore rust-version specification in packages"
 type = "boolean"
 required = false
 arg = ["--ignore-rust-version"]
 
 [[tools.parameters]]
 name = "locked"
-description = "Assert that `Cargo.lock` will remain unchanged"
+description = "Assert that Cargo.lock will remain unchanged"
 type = "boolean"
 required = false
 arg = ["--locked"]

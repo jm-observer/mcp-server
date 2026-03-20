@@ -1,6 +1,11 @@
 use crate::types::ToolOutput;
 use mcp_server::config::tool::ToolFile;
 
+/// 为单个 tool 生成独立的 TOML 文件内容
+pub fn generate_single_tool_toml(command_name: &str, output: &ToolOutput) -> String {
+    generate_toml_file(command_name, &[output.clone()])
+}
+
 pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String {
     let all_defs: Vec<_> = outputs.iter().map(|o| o.tool_def.clone()).collect();
 

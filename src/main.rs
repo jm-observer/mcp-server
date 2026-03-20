@@ -98,6 +98,31 @@ async fn run_sse_server(handler: McpHandler, config: &ServerConfig) -> std::io::
     .await
 }
 
+/// 递归加载目录下所有 .toml 工具文件（支持 tools.d/cargo/cargo_build.toml 结构）
+fn load_tool_files(dir: &Path, registry: &mut ToolRegistry, default_timeout: u64) -> std::io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            load_tool_files(&path, registry, default_timeout)?;
+        } else if path.extension().unwrap_or_default() == "toml" {
+            info!("Loading tool file: {:?}", path);
+            let content = fs::read_to_string(&path)?;
+            match toml::from_str::<ToolFile>(&content) {
+                Ok(tool_file) => {
+                    if let Err(e) = registry.register(tool_file, default_timeout) {
+                        error!("Failed to register tools from {:?}: {}", path, e);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse {:?}: {}", path, e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let _ = custom_utils::logger::logger_feature("mcp-server", Debug, Info, false).build();
@@ -141,24 +166,7 @@ async fn main() -> std::io::Result<()> {
         config_dir.join("tools.d")
     };
     if tools_dir.exists() && tools_dir.is_dir() {
-        for entry in fs::read_dir(tools_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().unwrap_or_default() == "toml" {
-                info!("Loading tool file: {:?}", path);
-                let content = fs::read_to_string(&path)?;
-                match toml::from_str::<ToolFile>(&content) {
-                    Ok(tool_file) => {
-                        if let Err(e) = registry.register(tool_file, server_config.defaults.timeout_secs) {
-                            error!("Failed to register tools from {:?}: {}", path, e);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to parse {:?}: {}", path, e);
-                    }
-                }
-            }
-        }
+        load_tool_files(&tools_dir, &mut registry, server_config.defaults.timeout_secs)?;
     } else {
         info!("tools.d directory not found or is not a directory");
     }

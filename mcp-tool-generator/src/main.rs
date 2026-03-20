@@ -54,37 +54,55 @@ async fn main() -> Result<()> {
     log::info!("Starting recursive help crawl for {} (depth: {})", args.command_name, args.depth);
     let mut crawler = HelpCrawler::new(&mut client, &llm, args.depth);
     let help_tree = crawler.crawl(&args.command_name).await?;
-    let flat_commands = HelpCrawler::flatten(&help_tree);
-    log::info!("Crawled {} command variants", flat_commands.len());
 
-    // 4. Get JSON Schema for tool definitions
+    // 4. 判断是否有子命令，决定生成哪些 tool
+    let flat_commands = if help_tree.children.is_empty() {
+        // 无子命令：只生成 root 命令自身的 tool
+        log::info!("No subcommands found, generating tool for command itself");
+        vec![crate::types::FlatCommand {
+            full_command: help_tree.full_command.clone(),
+            help_text: help_tree.help_text.clone(),
+        }]
+    } else {
+        // 有子命令：跳过 root，只对子命令生成 tool
+        let all = HelpCrawler::flatten(&help_tree);
+        log::info!("Found {} subcommands, skipping root command", all.len() - 1);
+        all.into_iter().skip(1).collect()
+    };
+    log::info!("Will generate tools for {} commands", flat_commands.len());
+
+    // 5. 创建输出目录: output_dir/command_name/
+    let out_dir = Path::new(&args.output_dir).join(&args.command_name);
+    fs::create_dir_all(&out_dir)?;
+    log::info!("Output directory: {}", out_dir.display());
+
+    // 6. Get JSON Schema for tool definitions
     let schema = client.get_tool_schema();
 
-    // 5. Generate tool definitions for each command using LLM (JSON -> ToolDef)
-    let mut tool_outputs = Vec::new();
-    for cmd in flat_commands {
+    // 7. 对每个命令生成 tool 定义并写入独立文件
+    let mut generated_count = 0;
+    for cmd in &flat_commands {
         log::info!("Generating tool definition for: {}", cmd.full_command.join(" "));
-        let prompt = prompt::build_json_generation_prompt(&cmd, &schema);
+        let prompt = prompt::build_json_generation_prompt(cmd, &schema);
         match llm.chat(prompt).await {
             Ok(resp) => {
                 match prompt::parse_json_response(&resp, cmd.full_command.clone()) {
-                    Ok(out) => tool_outputs.push(out),
+                    Ok(tool_output) => {
+                        let cmd_label = cmd.full_command.join(" ");
+                        let toml_content = toml_output::generate_single_tool_toml(&cmd_label, &tool_output);
+                        let file_name = format!("{}.toml", tool_output.tool_def.name);
+                        let file_path = out_dir.join(&file_name);
+                        fs::write(&file_path, &toml_content)?;
+                        log::info!("Written: {}", file_path.display());
+                        generated_count += 1;
+                    }
                     Err(e) => log::error!("Failed to parse LLM response for {}: {}", cmd.full_command.join(" "), e),
                 }
             }
             Err(e) => log::error!("LLM call failed for {}: {}", cmd.full_command.join(" "), e),
         }
     }
-
-    // 6. Merge and Output TOML
-    let final_toml = toml_output::generate_toml_file(&args.command_name, &tool_outputs);
-    
-    if let Some(path) = &args.output_path {
-        fs::write(path, final_toml)?;
-        log::info!("Tool configuration saved to: {}", path);
-    } else {
-        println!("{}", final_toml);
-    }
+    log::info!("Generated {} tool files in {}", generated_count, out_dir.display());
 
     client.close().await?;
     Ok(())
