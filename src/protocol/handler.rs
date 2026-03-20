@@ -1,7 +1,10 @@
 use std::sync::Arc;
+use std::path::Path;
 use log::{info, error};
 use serde_json::Value;
+use std::collections::HashMap;
 use crate::config::{ServerConfig, ToolAction, ToolRegistry};
+use crate::security::validate_path;
 use super::types::*;
 
 pub struct McpHandler {
@@ -111,6 +114,19 @@ impl McpHandler {
             let mut properties = serde_json::Map::new();
             let mut required = vec![];
 
+            // cwd=true 时，确保 cwd 参数出现在 schema 中
+            if tool.def.cwd {
+                let has_cwd_param = tool.def.parameters.as_ref()
+                    .map_or(false, |p| p.iter().any(|param| param.name == "cwd"));
+                if !has_cwd_param {
+                    let mut cwd_schema = serde_json::Map::new();
+                    cwd_schema.insert("type".into(), Value::String("string".into()));
+                    cwd_schema.insert("description".into(), Value::String("Working directory (absolute path)".into()));
+                    properties.insert("cwd".into(), Value::Object(cwd_schema));
+                    required.push(Value::String("cwd".into()));
+                }
+            }
+
             if let Some(params) = &tool.def.parameters {
                 for param in params {
                     let mut prop_schema = serde_json::Map::new();
@@ -201,7 +217,15 @@ impl McpHandler {
 
         use crate::executor::command::CommandExecutor;
         use crate::executor::http::HttpExecutor;
-        
+
+        // 内置文件操作 tool 分发
+        match call_params.name.as_str() {
+            "list_dir" => return self.handle_builtin_list_dir(id, &provided_args).await,
+            "read_file" => return self.handle_builtin_read_file(id, &provided_args).await,
+            "write_file" => return self.handle_builtin_write_file(id, &provided_args).await,
+            _ => {}
+        }
+
         if call_params.name == "direct_command" {
             let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
             let cmd_str = provided_args.get("command").and_then(|v| v.as_str()).unwrap_or_default();
@@ -359,6 +383,131 @@ impl McpHandler {
                 result: Some(serde_json::to_value(call_result).unwrap()),
                 error: None,
             }
+        }
+    }
+
+    fn make_tool_result(id: Value, content: Vec<ContentBlock>, is_error: Option<bool>) -> JsonRpcResponse {
+        let call_result = ToolCallResult { content, is_error };
+        JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(id),
+            result: Some(serde_json::to_value(call_result).unwrap()),
+            error: None,
+        }
+    }
+
+    fn make_tool_error(id: Value, msg: String) -> JsonRpcResponse {
+        Self::make_tool_result(
+            id,
+            vec![ContentBlock { r#type: "text".into(), text: msg }],
+            Some(true),
+        )
+    }
+
+    async fn handle_builtin_list_dir(&self, id: Value, args: &HashMap<String, Value>) -> JsonRpcResponse {
+        let path_str = match args.get("path").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return Self::make_tool_error(id, "Missing required parameter: path".into()),
+        };
+
+        let path = Path::new(path_str);
+        let allowed = &self.server_config.defaults.allowed_dirs;
+
+        if let Err(e) = validate_path(path, allowed) {
+            return Self::make_tool_error(id, format!("Security error: {}", e));
+        }
+
+        let entries = match std::fs::read_dir(path) {
+            Ok(e) => e,
+            Err(e) => return Self::make_tool_error(id, format!("IO error: {}", e)),
+        };
+
+        let mut lines = Vec::new();
+        for entry in entries {
+            match entry {
+                Ok(entry) => {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let file_type = match entry.file_type() {
+                        Ok(ft) => {
+                            if ft.is_dir() { "dir" } else if ft.is_file() { "file" } else { "other" }
+                        }
+                        Err(_) => "unknown",
+                    };
+                    lines.push(format!("[{}] {}", file_type, name));
+                }
+                Err(e) => {
+                    lines.push(format!("[error] {}", e));
+                }
+            }
+        }
+
+        let text = if lines.is_empty() {
+            "(empty directory)".to_string()
+        } else {
+            lines.join("\n")
+        };
+
+        Self::make_tool_result(
+            id,
+            vec![ContentBlock { r#type: "text".into(), text }],
+            None,
+        )
+    }
+
+    async fn handle_builtin_read_file(&self, id: Value, args: &HashMap<String, Value>) -> JsonRpcResponse {
+        let path_str = match args.get("path").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return Self::make_tool_error(id, "Missing required parameter: path".into()),
+        };
+
+        let path = Path::new(path_str);
+        let allowed = &self.server_config.defaults.allowed_dirs;
+
+        if let Err(e) = validate_path(path, allowed) {
+            return Self::make_tool_error(id, format!("Security error: {}", e));
+        }
+
+        match std::fs::read_to_string(path) {
+            Ok(content) => Self::make_tool_result(
+                id,
+                vec![ContentBlock { r#type: "text".into(), text: content }],
+                None,
+            ),
+            Err(e) => Self::make_tool_error(id, format!("IO error: {}", e)),
+        }
+    }
+
+    async fn handle_builtin_write_file(&self, id: Value, args: &HashMap<String, Value>) -> JsonRpcResponse {
+        let path_str = match args.get("path").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return Self::make_tool_error(id, "Missing required parameter: path".into()),
+        };
+        let content = match args.get("content").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return Self::make_tool_error(id, "Missing required parameter: content".into()),
+        };
+
+        let path = Path::new(path_str);
+        let allowed = &self.server_config.defaults.allowed_dirs;
+
+        if let Err(e) = validate_path(path, allowed) {
+            return Self::make_tool_error(id, format!("Security error: {}", e));
+        }
+
+        // 检查父目录是否存在（不自动创建）
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                return Self::make_tool_error(id, format!("Parent directory does not exist: {}", parent.display()));
+            }
+        }
+
+        match std::fs::write(path, content) {
+            Ok(_) => Self::make_tool_result(
+                id,
+                vec![ContentBlock { r#type: "text".into(), text: "File written successfully.".into() }],
+                None,
+            ),
+            Err(e) => Self::make_tool_error(id, format!("IO error: {}", e)),
         }
     }
 }

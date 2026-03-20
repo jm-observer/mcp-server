@@ -126,6 +126,12 @@ Do NOT invent parameters that are not explicitly present in the help text.
 
 If information is missing or unclear, use the minimal valid value required by the schema.
 
+# Working Directory (cwd)
+
+Do NOT set "cwd" in the output. The working directory will be handled automatically by the tool framework.
+
+Do NOT add a "cwd" parameter to the parameters array.
+
 # Dangerous Flag Classification
 
 Determine whether the command is dangerous and set the "dangerous" field accordingly:

@@ -1,21 +1,10 @@
-[config]
-working_dir = "D:\\git"    # 项目根目录的父目录（需在 allowed_dirs 白名单内）
-
 [[tools]]
 name = "cargo_build"
 description = "Compile a local package and all of its dependencies"
 type = "command"
 command = "cargo"
 args = ["build"]
-sub_dir = "${project}"         # 进入具体项目目录后再执行
-
-[[tools.parameters]]
-name = "project"
-description = "Project directory name under working_dir"
-type = "string"
-required = true
-# 注意：此参数没有 arg 字段，因为它不拼接到 CLI 参数里，
-# 而是通过 sub_dir 模板影响工作目录
+cwd = true
 
 [[tools.parameters]]
 name = "package"

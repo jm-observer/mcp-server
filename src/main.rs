@@ -125,7 +125,10 @@ async fn main() -> std::io::Result<()> {
 
     let mut registry = ToolRegistry::new();
     
-    // Register builtin tool if allowed
+    // Register builtin tools
+    registry.register_builtin_file_tools();
+    info!("Builtin file tools registered (list_dir, read_file, write_file)");
+
     if server_config.security.allow_direct_command {
         registry.register_builtin_direct_command();
         info!("Builtin direct_command tool registered");

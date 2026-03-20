@@ -145,13 +145,24 @@ impl CommandExecutor {
 
         let t_cmd = cmd_opt.as_ref().ok_or(CommandError::MissingCommand)?;
 
-        let mut work_dir = tool.working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-
-        if let Some(sub_tpl) = sub_dir_opt {
-            let sub_res = Self::resolve_template(sub_tpl, arguments)?;
-            work_dir = validate_sub_dir(&work_dir, &sub_res)?;
-        }
-        validate_working_dir(&work_dir, &self.allowed_dirs)?;
+        // cwd 优先：如果 ToolDef.cwd 为 true，从参数 "cwd" 中取绝对路径
+        // 否则 fallback 到旧的 working_dir + sub_dir 逻辑
+        let work_dir = if tool.def.cwd {
+            let cwd_str = arguments.get("cwd")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| CommandError::TemplateResolution("cwd parameter is required when cwd=true".into()))?;
+            let cwd_path = std::path::PathBuf::from(cwd_str);
+            validate_working_dir(&cwd_path, &self.allowed_dirs)?;
+            cwd_path
+        } else {
+            let mut wd = tool.working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            if let Some(sub_tpl) = sub_dir_opt {
+                let sub_res = Self::resolve_template(sub_tpl, arguments)?;
+                wd = validate_sub_dir(&wd, &sub_res)?;
+            }
+            validate_working_dir(&wd, &self.allowed_dirs)?;
+            wd
+        };
 
         let cmd_exec = Self::resolve_template(t_cmd, arguments)?;
         let resolved_args = Self::resolve_parameter_args(tool, arguments)?;
@@ -365,6 +376,7 @@ mod tests {
                 },
                 env: None,
                 timeout_secs: None,
+                cwd: false,
                 parameters: Some(parameters),
                 dangerous: false,
             },

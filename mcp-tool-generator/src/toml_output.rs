@@ -1,8 +1,24 @@
 use crate::types::ToolOutput;
-use mcp_server::config::tool::{ToolFile, ToolFileConfig};
+use mcp_server::config::tool::{ParameterDef, ToolFile};
 
 pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String {
-    let all_defs: Vec<_> = outputs.iter().map(|o| o.tool_def.clone()).collect();
+    // 为每个 tool 设置 cwd = true 并确保包含 cwd 参数
+    let all_defs: Vec<_> = outputs.iter().map(|o| {
+        let mut def = o.tool_def.clone();
+        def.cwd = true;
+        // 确保 parameters 中包含 cwd 参数（如果 LLM 没有生成）
+        let params = def.parameters.get_or_insert_with(Vec::new);
+        if !params.iter().any(|p| p.name == "cwd") {
+            params.insert(0, ParameterDef {
+                name: "cwd".to_string(),
+                description: "Working directory (absolute path)".to_string(),
+                r#type: "string".to_string(),
+                required: true,
+                arg: None,
+            });
+        }
+        def
+    }).collect();
 
     // 记录哪些 tool name 是 dangerous，用于后续插入注释
     let dangerous_names: std::collections::HashSet<String> = outputs
@@ -12,10 +28,7 @@ pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String 
         .collect();
 
     let tool_file = ToolFile {
-        config: Some(ToolFileConfig {
-            working_dir: Some(".".into()),
-            ..Default::default()
-        }),
+        config: None,
         tools: all_defs,
     };
 
@@ -69,7 +82,7 @@ fn extract_tool_name(line: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mcp_server::config::tool::{ParameterDef, ToolAction, ToolDef};
+    use mcp_server::config::tool::{ToolAction, ToolDef};
 
     fn make_tool(name: &str, dangerous: bool) -> ToolOutput {
         ToolOutput {
@@ -83,6 +96,7 @@ mod tests {
                 },
                 env: None,
                 timeout_secs: None,
+                cwd: false,
                 parameters: None,
                 dangerous,
             },
@@ -151,6 +165,7 @@ mod tests {
                 },
                 env: None,
                 timeout_secs: None,
+                cwd: false,
                 parameters: Some(vec![ParameterDef {
                     name: "package".to_string(),
                     description: "Package to build".to_string(),
@@ -168,9 +183,14 @@ mod tests {
         // 验证可解析
         let parsed: ToolFile = toml::from_str(&toml).unwrap();
         assert_eq!(parsed.tools.len(), 1);
+        assert!(parsed.tools[0].cwd);
         let params = parsed.tools[0].parameters.as_ref().unwrap();
+        // cwd 参数被自动插入到第一个位置
+        assert_eq!(params[0].name, "cwd");
+        // package 参数在后面
+        let pkg_param = params.iter().find(|p| p.name == "package").unwrap();
         assert_eq!(
-            params[0].arg.as_ref().unwrap(),
+            pkg_param.arg.as_ref().unwrap(),
             &vec!["-p".to_string(), "${package}".to_string()]
         );
     }
@@ -181,7 +201,11 @@ mod tests {
         let toml_str = generate_toml_file("git", &outputs);
         let parsed: ToolFile = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.tools[0].name, "status");
-        assert_eq!(parsed.config.unwrap().working_dir, Some(".".to_string()));
+        assert!(parsed.tools[0].cwd);
+        assert!(parsed.config.is_none());
+        // 确保自动添加了 cwd 参数
+        let params = parsed.tools[0].parameters.as_ref().unwrap();
+        assert!(params.iter().any(|p| p.name == "cwd" && p.required));
     }
 
     #[test]

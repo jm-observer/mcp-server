@@ -6,20 +6,28 @@ use thiserror::Error;
 pub enum SecurityError {
     #[error("Working directory is not in allowed list: {0}")]
     DirNotAllowed(PathBuf),
+    #[error("Path is not in allowed list: {0}")]
+    PathNotAllowed(PathBuf),
     #[error("Sub directory escapes working directory: {0}")]
     PathEscape(String),
 }
 
-/// 检查 path 是否在 allowed_dirs 白名单内
-pub fn validate_working_dir(path: &Path, allowed_dirs: &[PathBuf]) -> Result<(), SecurityError> {
+/// 校验路径是否在 allowed_dirs 白名单内，返回清理后的路径
+pub fn validate_path(path: &Path, allowed_dirs: &[PathBuf]) -> Result<PathBuf, SecurityError> {
     let cleaned = path.clean();
     for allowed in allowed_dirs {
         let allowed_cleaned = allowed.clean();
         if cleaned.starts_with(&allowed_cleaned) {
-            return Ok(());
+            return Ok(cleaned);
         }
     }
-    Err(SecurityError::DirNotAllowed(cleaned))
+    Err(SecurityError::PathNotAllowed(cleaned))
+}
+
+/// 检查 path 是否在 allowed_dirs 白名单内
+pub fn validate_working_dir(path: &Path, allowed_dirs: &[PathBuf]) -> Result<(), SecurityError> {
+    validate_path(path, allowed_dirs)?;
+    Ok(())
 }
 
 /// 检查 sub_dir 解析后的路径是否仍在 working_dir 内（防路径逃逸）

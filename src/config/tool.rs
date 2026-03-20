@@ -27,6 +27,11 @@ pub struct ToolDef {
     pub action: ToolAction,
     pub env: Option<HashMap<String, String>>,
     pub timeout_secs: Option<u64>,
+    /// 是否从参数 "cwd" 中获取工作目录。
+    /// 设为 true 时，tool 调用必须传入名为 "cwd" 的参数作为工作目录（绝对路径）。
+    /// 替代原有的 working_dir + sub_dir 两层设计。
+    #[serde(default)]
+    pub cwd: bool,
     #[serde(default)]
     pub parameters: Option<Vec<ParameterDef>>,
     /// LLM 生成阶段标记：该工具是否有副作用。
@@ -173,6 +178,7 @@ impl ToolRegistry {
             },
             env: None,
             timeout_secs: None,
+            cwd: false,
             parameters: Some(vec![
                 ParameterDef {
                     name: "command".to_string(),
@@ -208,5 +214,96 @@ impl ToolRegistry {
         };
 
         self.tools.insert(registered.def.name.clone(), registered);
+    }
+
+    /// 注册内置文件操作 tool：list_dir、read_file、write_file
+    pub fn register_builtin_file_tools(&mut self) {
+        // list_dir
+        let list_dir = RegisteredTool {
+            def: ToolDef {
+                name: "list_dir".to_string(),
+                description: "List files and subdirectories in the specified directory. Path must be an absolute path within allowed_dirs.".to_string(),
+                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                env: None,
+                timeout_secs: None,
+                cwd: false,
+                parameters: Some(vec![
+                    ParameterDef {
+                        name: "path".to_string(),
+                        description: "Absolute path of the target directory".to_string(),
+                        r#type: "string".to_string(),
+                        required: true,
+                        arg: None,
+                    },
+                ]),
+                dangerous: false,
+            },
+            working_dir: None,
+            base_url: None,
+            effective_timeout: 60,
+            env: HashMap::new(),
+        };
+        self.tools.insert("list_dir".to_string(), list_dir);
+
+        // read_file
+        let read_file = RegisteredTool {
+            def: ToolDef {
+                name: "read_file".to_string(),
+                description: "Read the content of a file. Path must be an absolute path within allowed_dirs.".to_string(),
+                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                env: None,
+                timeout_secs: None,
+                cwd: false,
+                parameters: Some(vec![
+                    ParameterDef {
+                        name: "path".to_string(),
+                        description: "Absolute path of the file to read".to_string(),
+                        r#type: "string".to_string(),
+                        required: true,
+                        arg: None,
+                    },
+                ]),
+                dangerous: false,
+            },
+            working_dir: None,
+            base_url: None,
+            effective_timeout: 60,
+            env: HashMap::new(),
+        };
+        self.tools.insert("read_file".to_string(), read_file);
+
+        // write_file
+        let write_file = RegisteredTool {
+            def: ToolDef {
+                name: "write_file".to_string(),
+                description: "Write content to a file (overwrites if exists, creates if not). Path must be an absolute path within allowed_dirs. Parent directory must exist.".to_string(),
+                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                env: None,
+                timeout_secs: None,
+                cwd: false,
+                parameters: Some(vec![
+                    ParameterDef {
+                        name: "path".to_string(),
+                        description: "Absolute path of the file to write".to_string(),
+                        r#type: "string".to_string(),
+                        required: true,
+                        arg: None,
+                    },
+                    ParameterDef {
+                        name: "content".to_string(),
+                        description: "Content to write to the file".to_string(),
+                        r#type: "string".to_string(),
+                        required: true,
+                        arg: None,
+                    },
+                ]),
+                dangerous: false,
+            },
+            working_dir: None,
+            base_url: None,
+            effective_timeout: 60,
+            env: HashMap::new(),
+        };
+        self.tools.insert("write_file".to_string(), write_file);
     }
 }
