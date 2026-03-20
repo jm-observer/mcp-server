@@ -128,9 +128,11 @@ If information is missing or unclear, use the minimal valid value required by th
 
 # Working Directory (cwd)
 
-Do NOT set "cwd" in the output. The working directory will be handled automatically by the tool framework.
+If the command typically needs to run in a specific project/working directory (e.g., build tools, package managers, version control), set `"cwd": true`.
 
-Do NOT add a "cwd" parameter to the parameters array.
+When `cwd` is true, the framework automatically injects a required "cwd" parameter (absolute path) for the caller to specify the working directory. You do NOT need to add a "cwd" parameter to the parameters array yourself.
+
+If the command is location-independent (e.g., system utilities, help, version), set `"cwd": false` or omit it.
 
 # Dangerous Flag Classification
 
