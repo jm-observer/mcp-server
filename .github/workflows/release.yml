@@ -15,10 +15,8 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact_name: rust-template_x86_64-pc-windows-msvc.exe
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact_name: rust-template_aarch64-unknown-linux-gnu
 
     runs-on: ${{ matrix.os }}
 
@@ -42,21 +40,29 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
+      - name: Get package name
+        id: pkg
+        shell: bash
+        run: |
+          PKG_NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
+          echo "name=$PKG_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Prepare artifact
         shell: bash
         run: |
+          PKG=${{ steps.pkg.outputs.name }}
           mkdir -p dist
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/${{ matrix.target }}/release/rust-template.exe dist/${{ matrix.artifact_name }}
+            cp "target/${{ matrix.target }}/release/${PKG}.exe" "dist/${PKG}_${{ matrix.target }}.exe"
           else
-            cp target/${{ matrix.target }}/release/rust-template dist/${{ matrix.artifact_name }}
+            cp "target/${{ matrix.target }}/release/${PKG}" "dist/${PKG}_${{ matrix.target }}"
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}
+          name: ${{ steps.pkg.outputs.name }}_${{ matrix.target }}
+          path: dist/${{ steps.pkg.outputs.name }}_${{ matrix.target }}*
 
   release:
     needs: build

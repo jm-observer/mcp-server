@@ -6,46 +6,45 @@
 
 ## Project Overview
 
-This is a Rust async application template. New projects should be based on this structure.
+Rust 异步应用程序。具体功能描述请补充到这里。
 
 ## Tech Stack & Conventions
 
-- **Async runtime**: `tokio` (full features)
-- **Logging**: Use `log` crate macros (`log::info!`, `log::error!`, etc.). Logger initialization via `custom_utils::logger::logger_feature`. Do NOT use `println!` for application output — always use `log` macros.
-- **HTTP client**: `reqwest` with `rustls-tls` backend (no OpenSSL). Always use `reqwest::Client` (async), avoid blocking API.
-- **Error handling**: `anyhow::Result` for application-level errors. Use `?` operator for propagation. Add `.context("...")` for meaningful error messages when appropriate.
-- **Serialization**: `serde` + `serde_json`.
+- **Async runtime**: `tokio` (full features)。
+- **Logging**: 使用 `log` crate 的宏（`log::info!`、`log::error!` 等）。日志初始化通过 `custom_utils::logger::logger_feature`。禁止使用 `println!` 输出应用日志。
+- **HTTP client**: `reqwest`，使用 `rustls-tls` 后端（不依赖 OpenSSL）。始终使用异步 `reqwest::Client`，禁止使用阻塞 API。
+- **Error handling**: 应用层错误使用 `anyhow::Result`，通过 `?` 传播，必要时添加 `.context("...")`。
+- **Serialization**: `serde` + `serde_json`。
 
 ## Code Structure
 
-- Prefer putting logic in `src/lib.rs` (and sub-modules under `src/`). Keep `src/main.rs` minimal — only runtime bootstrap and logger init.
-- When the project grows, split into modules under `src/` and re-export from `lib.rs`.
+- 业务逻辑优先放在 `src/lib.rs` 及 `src/` 下的子模块中。`src/main.rs` 保持精简，只负责运行时启动和日志初始化。
+- 项目规模增长时，拆分为 `src/` 下的子模块，通过 `lib.rs` 统一导出。
 
 ## Style
 
-- Follow `rustfmt.toml` config: max width 120, 4-space indent.
-- Follow `clippy.toml` thresholds.
-- Run `cargo fmt --check` to verify formatting before committing.
+- 遵循 `rustfmt.toml` 配置：最大行宽 120，4 空格缩进。
+- 遵循 `clippy.toml` 阈值配置。
+- 提交前执行 `cargo fmt --check` 验证格式。
 
 ## Code Quality
 
-- Use `cargo clippy -- -D warnings` to check code. All clippy warnings must be resolved before committing.
-- Do NOT suppress clippy warnings with `#[allow(...)]` unless there is a justified reason documented in a comment.
-- Prefer `cargo check` for fast compilation verification during development.
+- 使用 `cargo clippy -- -D warnings` 检查代码，所有 clippy 警告必须在提交前解决。
+- 禁止使用 `#[allow(...)]` 压制警告，除非有充分理由并在注释中说明。
+- 开发过程中优先使用 `cargo check` 快速验证编译。
 
 ## Dependencies
 
-- Do NOT add new dependencies without explicit user approval. Evaluate necessity before introducing a new crate.
-- Prefer crates that are well-maintained and have minimal transitive dependencies.
-- `Cargo.lock` is gitignored (library-style template). If the project is a deployed binary, consider tracking it.
+- 未经用户明确同意，不得添加新依赖。引入新 crate 前需评估必要性。
+- 优先选择维护良好、传递依赖少的 crate。
 
 ## Error Handling
 
-- Never use `.unwrap()` or `.expect()` in library code (`src/lib.rs` and modules). Use `?` with `anyhow::Result` instead.
-- `.unwrap()` is acceptable only in `main.rs` bootstrap or tests.
+- 库代码（`src/lib.rs` 及子模块）中禁止使用 `.unwrap()` 或 `.expect()`，使用 `?` 配合 `anyhow::Result`。
+- `.unwrap()` 仅允许在 `main.rs` 启动逻辑和测试中使用。
 
 ## Build & Release
 
-- CI builds two targets: `x86_64-pc-windows-msvc` and `aarch64-unknown-linux-gnu`.
-- Release is triggered by pushing a `v*` tag.
-- Before pushing a tag, verify locally: `cargo clippy -- -D warnings && cargo fmt --check && cargo test`.
+- CI 构建两个目标：`x86_64-pc-windows-msvc` 和 `aarch64-unknown-linux-gnu`。
+- 通过推送 `v*` 标签触发 Release。
+- 推送标签前本地验证：`cargo clippy -- -D warnings && cargo fmt --check && cargo test`。
