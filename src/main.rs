@@ -1,14 +1,37 @@
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{App, HttpResponse, HttpServer, Responder, web};
+use bytes::Bytes;
+use clap::Parser;
+use log::{
+    LevelFilter::{Debug, Info},
+    error, info,
+};
 use mcp_server::config::{ServerConfig, ToolFile, ToolRegistry};
 use mcp_server::protocol::McpHandler;
 use mcp_server::transport::sse::SessionManager;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use log::{error, info, LevelFilter::{Debug, Info}};
-use bytes::Bytes;
+
+#[derive(Parser, Debug)]
+#[command(name = "mcp-server")]
+#[command(about = "MCP Server - A Model Context Protocol server implementation")]
+struct Cli {
+    #[arg(long = "schema", help = "Print tool configuration schema (JSON)")]
+    schema: bool,
+
+    #[arg(
+        short = 'c',
+        long = "config",
+        default_value = "config.toml",
+        help = "Path to config file"
+    )]
+    config: String,
+
+    #[arg(long = "stdio", help = "Run in stdio mode (for CLI integration)")]
+    stdio: bool,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -74,7 +97,7 @@ async fn handle_message(
         None => {
             info!("Handler produced no response for session {}", session_id);
             HttpResponse::Accepted().finish()
-        },
+        }
     }
 }
 
@@ -126,20 +149,14 @@ fn load_tool_files(dir: &Path, registry: &mut ToolRegistry, default_timeout: u64
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let _ = custom_utils::logger::logger_feature("mcp-server", Debug, Info, false).build();
-    let args: Vec<String> = std::env::args().collect();
+    let args = Cli::parse();
 
-    if args.contains(&"--schema".to_string()) {
+    if args.schema {
         println!("{}", mcp_server::config::tool_config_schema());
         return Ok(());
     }
 
-    let mut config_path = Path::new("config.toml").to_path_buf();
-    for i in 0..args.len() {
-        if args[i] == "--config" && i + 1 < args.len() {
-            config_path = Path::new(&args[i + 1]).to_path_buf();
-        }
-    }
-
+    let config_path = Path::new(&args.config);
     let server_config = if config_path.exists() {
         let content = fs::read_to_string(&config_path)?;
         toml::from_str::<ServerConfig>(&content).expect("Failed to parse config")
@@ -149,8 +166,7 @@ async fn main() -> std::io::Result<()> {
     info!("Loaded server config");
 
     let mut registry = ToolRegistry::new();
-    
-    // Register builtin tools
+
     registry.register_builtin_file_tools();
     info!("Builtin file tools registered (list_dir, read_file, write_file)");
 
@@ -173,7 +189,7 @@ async fn main() -> std::io::Result<()> {
 
     let handler = McpHandler::new(Arc::new(registry), Arc::new(server_config.clone()));
 
-    if args.contains(&"--stdio".to_string()) {
+    if args.stdio {
         mcp_server::transport::stdio::run_stdio(Arc::new(handler)).await
     } else {
         run_sse_server(handler, &server_config).await

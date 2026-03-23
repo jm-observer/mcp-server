@@ -1660,6 +1660,7 @@ dependencies = [
  "actix-web",
  "async-stream",
  "bytes",
+ "clap",
  "custom-utils",
  "dashmap",
  "futures",
