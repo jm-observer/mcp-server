@@ -7,30 +7,32 @@ use std::future::Future;
 use std::pin::Pin;
 use tokio::process::Command;
 
-// Helper to execute a command and capture stdout/stderr as strings
-async fn execute_command(cmd: &str, args: &[String]) -> Result<crate::mcp_client::CommandOutput> {
-    let mut command = Command::new(cmd);
-    command.args(args);
-    // Capture stdout and stderr
-    let output = command
+#[derive(Debug)]
+struct CommandOutput {
+    stdout: String,
+    stderr: String,
+}
+
+async fn execute_command(cmd: &str, args: &[String]) -> Result<CommandOutput> {
+    let output = Command::new(cmd)
+        .args(args)
         .output()
         .await
         .map_err(|e| anyhow!("Failed to spawn command {}: {}", cmd, e))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    Ok(crate::mcp_client::CommandOutput { stdout, stderr })
+    Ok(CommandOutput { stdout, stderr })
 }
 
+const MAX_DEPTH: usize = 2;
+
 pub struct HelpCrawler<'a> {
-    // Fixed depth of 2 (process subcommands only)
     llm_client: &'a LlmClient,
-    // Fixed depth of 2 (process subcommands only)
-    depth: usize,
 }
 
 impl<'a> HelpCrawler<'a> {
-    pub fn new(llm_client: &'a LlmClient, depth: usize) -> Self {
-        Self { llm_client, depth }
+    pub fn new(llm_client: &'a LlmClient) -> Self {
+        Self { llm_client }
     }
 
     pub async fn crawl(&mut self, command: &str) -> Result<CommandHelp> {
@@ -51,12 +53,10 @@ impl<'a> HelpCrawler<'a> {
         args.push("--help".to_string());
 
         log::info!("Executing: {} {}", cmd, args.join(" "));
-        // Execute the command directly using OS process
         let output = match execute_command(&cmd, &args).await {
             Ok(out) => out,
             Err(e) => {
                 log::warn!("Failed to execute {} {:?}: {}", cmd, args, e);
-                // fallback to -h flag
                 let mut fallback_args = args.clone();
                 if let Some(last) = fallback_args.last_mut() {
                     *last = "-h".to_string();
@@ -72,7 +72,6 @@ impl<'a> HelpCrawler<'a> {
         };
         debug!("{output:?}");
 
-        // stdout is the actual help text, but stderr might contain it too. We use stdout mostly.
         let help_text = if !output.stdout.trim().is_empty() {
             output.stdout.clone()
         } else {
@@ -90,7 +89,7 @@ impl<'a> HelpCrawler<'a> {
             children: Vec::new(),
         };
 
-        if depth < self.depth {
+        if depth < MAX_DEPTH {
             let cmd_str = command_parts.join(" ");
             let prompt = prompt::build_subcommand_prompt(&cmd_str, &help_text);
 

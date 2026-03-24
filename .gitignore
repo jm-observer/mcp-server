@@ -2,5 +2,6 @@
 
 # Added by cargo
 
-/target
-/mcp-tool-generator/target
+target/
+**/target/
+tools.d

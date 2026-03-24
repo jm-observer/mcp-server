@@ -1,7 +1,6 @@
 pub mod config;
 pub mod crawler;
 pub mod llm_client;
-pub mod mcp_client;
 pub mod prompt;
 pub mod toml_output;
 pub mod types;
@@ -16,28 +15,15 @@ use std::path::Path;
 #[tokio::main]
 async fn main() -> Result<()> {
     custom_utils::logger::logger_stdout_debug();
-    let mut args = config::GeneratorConfig::parse();
-    args.validate();
+    let args = config::GeneratorConfig::parse();
 
     log::info!("Starting tool generator for command: {}", args.command_name);
-
-    // 1. Connect to MCP Server
-    // 1. Connect to MCP Server only to fetch tool schema (no need for help execution)
-    let mut client = mcp_client::McpClient::connect("mcp-server", &args.server_config_path).await?;
-    log::info!("Connected to MCP server for schema retrieval");
-
-    client.initialize().await?;
-    log::info!("MCP Handshake complete");
-
     // 2. Initialize LLM Client
     let llm = LlmClient::new(&args.vllm_url, &args.model);
 
-    // 3. Recursive Crawling (fixed depth = 2)
-    log::info!(
-        "Starting recursive help crawl for {} (fixed depth 2)",
-        args.command_name
-    );
-    let mut crawler = HelpCrawler::new(&llm, 2);
+    // 3. Recursive Crawling
+    log::info!("Starting recursive help crawl for {}", args.command_name);
+    let mut crawler = HelpCrawler::new(&llm);
     let help_tree = crawler.crawl(&args.command_name).await?;
 
     // 4. 判断是否有子命令，决定生成哪些 tool
@@ -62,7 +48,7 @@ async fn main() -> Result<()> {
     log::info!("Output directory: {}", out_dir.display());
 
     // 6. Get JSON Schema for tool definitions
-    let schema = client.get_tool_schema();
+    let schema = mcp::config::tool_config_schema();
 
     // 7. 对每个命令生成 tool 定义并写入独立文件
     let mut generated_count = 0;
@@ -86,7 +72,5 @@ async fn main() -> Result<()> {
         }
     }
     log::info!("Generated {} tool files in {}", generated_count, out_dir.display());
-
-    client.close().await?;
     Ok(())
 }
