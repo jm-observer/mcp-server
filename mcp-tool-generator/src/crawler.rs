@@ -1,32 +1,47 @@
-use anyhow::{anyhow, Result};
-use std::pin::Pin;
-use std::future::Future;
-use log::debug;
-use crate::mcp_client::McpClient;
 use crate::llm_client::LlmClient;
-use crate::types::{CommandHelp, FlatCommand};
 use crate::prompt;
+use crate::types::{CommandHelp, FlatCommand};
+use anyhow::{Result, anyhow};
+use log::debug;
+use std::future::Future;
+use std::pin::Pin;
+use tokio::process::Command;
+
+// Helper to execute a command and capture stdout/stderr as strings
+async fn execute_command(cmd: &str, args: &[String]) -> Result<crate::mcp_client::CommandOutput> {
+    let mut command = Command::new(cmd);
+    command.args(args);
+    // Capture stdout and stderr
+    let output = command
+        .output()
+        .await
+        .map_err(|e| anyhow!("Failed to spawn command {}: {}", cmd, e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    Ok(crate::mcp_client::CommandOutput { stdout, stderr })
+}
 
 pub struct HelpCrawler<'a> {
-    mcp_client: &'a mut McpClient,
+    // Fixed depth of 2 (process subcommands only)
     llm_client: &'a LlmClient,
+    // Fixed depth of 2 (process subcommands only)
     depth: usize,
 }
 
 impl<'a> HelpCrawler<'a> {
-    pub fn new(mcp_client: &'a mut McpClient, llm_client: &'a LlmClient, depth: usize) -> Self {
-        Self {
-            mcp_client,
-            llm_client,
-            depth,
-        }
+    pub fn new(llm_client: &'a LlmClient, depth: usize) -> Self {
+        Self { llm_client, depth }
     }
 
     pub async fn crawl(&mut self, command: &str) -> Result<CommandHelp> {
         self.crawl_recursive(&[command.to_string()], 0).await
     }
 
-    fn crawl_recursive<'b>(&'b mut self, command_parts: &'b [String], depth: usize) -> Pin<Box<dyn Future<Output = Result<CommandHelp>> + 'b>> {
+    fn crawl_recursive<'b>(
+        &'b mut self,
+        command_parts: &'b [String],
+        depth: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<CommandHelp>> + 'b>> {
         Box::pin(self.crawl_recursive_inner(command_parts, depth))
     }
 
@@ -36,18 +51,20 @@ impl<'a> HelpCrawler<'a> {
         args.push("--help".to_string());
 
         log::info!("Executing: {} {}", cmd, args.join(" "));
-        let output = match self.mcp_client.execute_command(&cmd, &args, None).await {
+        // Execute the command directly using OS process
+        let output = match execute_command(&cmd, &args).await {
             Ok(out) => out,
             Err(e) => {
                 log::warn!("Failed to execute {} {:?}: {}", cmd, args, e);
-                // 尝试 fallback: -h
-                if let Some(last) = args.last_mut() {
+                // fallback to -h flag
+                let mut fallback_args = args.clone();
+                if let Some(last) = fallback_args.last_mut() {
                     *last = "-h".to_string();
                 }
-                match self.mcp_client.execute_command(&cmd, &args, None).await {
+                match execute_command(&cmd, &fallback_args).await {
                     Ok(out) => out,
                     Err(e) => {
-                        log::error!("Failed to execute {} {:?} with -h: {}", cmd, args, e);
+                        log::error!("Failed to execute {} {:?} with -h: {}", cmd, fallback_args, e);
                         return Err(anyhow!("Command execution failed: {}", e));
                     }
                 }
@@ -76,7 +93,7 @@ impl<'a> HelpCrawler<'a> {
         if depth < self.depth {
             let cmd_str = command_parts.join(" ");
             let prompt = prompt::build_subcommand_prompt(&cmd_str, &help_text);
-            
+
             match self.llm_client.chat(prompt).await {
                 Ok(response) => {
                     let subcommands = prompt::parse_subcommands_response(&response);

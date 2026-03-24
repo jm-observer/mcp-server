@@ -1,10 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_openai::{
     Client,
     config::OpenAIConfig,
-    types::chat::{
-        ChatCompletionRequestMessage, CreateChatCompletionRequestArgs,
-    },
+    types::chat::{ChatCompletionRequestMessage, CreateChatCompletionRequestArgs},
 };
 use log::{debug, info};
 
@@ -41,13 +39,18 @@ impl LlmClient {
             .max_tokens(10000u32)
             .build()?;
 
-        let response = self.client.chat().create(request).await
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
             .map_err(|e| anyhow!("LLM API error: {}", e))?;
 
         debug!("chat resp: {:?}", response);
         let content = response
             .choices
-            .first().ok_or_else(|| anyhow!("Empty choices in LLM response"))?;
+            .first()
+            .ok_or_else(|| anyhow!("Empty choices in LLM response"))?;
         if let Some(reason) = content.finish_reason {
             info!("chat end{reason:?}");
         }

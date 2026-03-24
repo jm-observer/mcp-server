@@ -1,17 +1,17 @@
 pub mod config;
-pub mod mcp_client;
-pub mod llm_client;
 pub mod crawler;
-pub mod types;
+pub mod llm_client;
+pub mod mcp_client;
 pub mod prompt;
 pub mod toml_output;
+pub mod types;
 
-use clap::Parser;
-use std::path::Path;
-use anyhow::Result;
-use crate::llm_client::LlmClient;
 use crate::crawler::HelpCrawler;
+use crate::llm_client::LlmClient;
+use anyhow::Result;
+use clap::Parser;
 use std::fs;
+use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,28 +21,10 @@ async fn main() -> Result<()> {
 
     log::info!("Starting tool generator for command: {}", args.command_name);
 
-    let mcp_path = if args.mcp_server_path == "mcp-server" {
-        // Fallback for tests if not in PATH
-        if cfg!(windows) {
-            if Path::new("..\\target\\debug\\mcp-server.exe").exists() {
-                "..\\target\\debug\\mcp-server.exe".to_string()
-            } else {
-                args.mcp_server_path.clone()
-            }
-        } else {
-            if Path::new("../target/debug/mcp-server").exists() {
-                "../target/debug/mcp-server".to_string()
-            } else {
-                args.mcp_server_path.clone()
-            }
-        }
-    } else {
-         args.mcp_server_path.clone()
-    };
-
     // 1. Connect to MCP Server
-    let mut client = mcp_client::McpClient::connect(&mcp_path, &args.server_config_path).await?;
-    log::info!("Connected to MCP server child process");
+    // 1. Connect to MCP Server only to fetch tool schema (no need for help execution)
+    let mut client = mcp_client::McpClient::connect("mcp-server", &args.server_config_path).await?;
+    log::info!("Connected to MCP server for schema retrieval");
 
     client.initialize().await?;
     log::info!("MCP Handshake complete");
@@ -50,9 +32,12 @@ async fn main() -> Result<()> {
     // 2. Initialize LLM Client
     let llm = LlmClient::new(&args.vllm_url, &args.model);
 
-    // 3. Recursive Crawling
-    log::info!("Starting recursive help crawl for {} (depth: {})", args.command_name, args.depth);
-    let mut crawler = HelpCrawler::new(&mut client, &llm, args.depth);
+    // 3. Recursive Crawling (fixed depth = 2)
+    log::info!(
+        "Starting recursive help crawl for {} (fixed depth 2)",
+        args.command_name
+    );
+    let mut crawler = HelpCrawler::new(&llm, 2);
     let help_tree = crawler.crawl(&args.command_name).await?;
 
     // 4. 判断是否有子命令，决定生成哪些 tool
@@ -85,20 +70,18 @@ async fn main() -> Result<()> {
         log::info!("Generating tool definition for: {}", cmd.full_command.join(" "));
         let prompt = prompt::build_json_generation_prompt(cmd, &schema);
         match llm.chat(prompt).await {
-            Ok(resp) => {
-                match prompt::parse_json_response(&resp, cmd.full_command.clone()) {
-                    Ok(tool_output) => {
-                        let cmd_label = cmd.full_command.join(" ");
-                        let toml_content = toml_output::generate_single_tool_toml(&cmd_label, &tool_output);
-                        let file_name = format!("{}.toml", tool_output.tool_def.name);
-                        let file_path = out_dir.join(&file_name);
-                        fs::write(&file_path, &toml_content)?;
-                        log::info!("Written: {}", file_path.display());
-                        generated_count += 1;
-                    }
-                    Err(e) => log::error!("Failed to parse LLM response for {}: {}", cmd.full_command.join(" "), e),
+            Ok(resp) => match prompt::parse_json_response(&resp, cmd.full_command.clone()) {
+                Ok(tool_output) => {
+                    let cmd_label = cmd.full_command.join(" ");
+                    let toml_content = toml_output::generate_single_tool_toml(&cmd_label, &tool_output);
+                    let file_name = format!("{}.toml", tool_output.tool_def.name);
+                    let file_path = out_dir.join(&file_name);
+                    fs::write(&file_path, &toml_content)?;
+                    log::info!("Written: {}", file_path.display());
+                    generated_count += 1;
                 }
-            }
+                Err(e) => log::error!("Failed to parse LLM response for {}: {}", cmd.full_command.join(" "), e),
+            },
             Err(e) => log::error!("LLM call failed for {}: {}", cmd.full_command.join(" "), e),
         }
     }
