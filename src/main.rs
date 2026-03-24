@@ -45,10 +45,15 @@ struct SessionQuery {
     session_id: String,
 }
 
-async fn sse_connect(state: web::Data<AppState>) -> impl Responder {
+async fn sse_connect(req: actix_web::HttpRequest, state: web::Data<AppState>) -> impl Responder {
     let (session_id, mut rx) = state.sessions.create_session();
     let endpoint_url = format!("/message?sessionId={}", session_id);
-    info!("New SSE connection created, session_id: {}", session_id);
+    info!(
+        "New SSE connection created, session_id: {}, from: {} {}",
+        session_id,
+        req.method(),
+        req.connection_info().realip_remote_addr().unwrap_or("unknown")
+    );
 
     HttpResponse::Ok()
         .content_type("text/event-stream")
