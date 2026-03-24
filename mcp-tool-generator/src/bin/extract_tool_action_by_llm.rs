@@ -1,7 +1,7 @@
-use mcp_tool_generator::llm_client::LlmClient;
-use mcp_tool_generator::prompt;
-use mcp_tool_generator::toml_output;
-use mcp_tool_generator::types::FlatCommand;
+use mcp_tool::llm_client::LlmClient;
+use mcp_tool::prompt;
+use mcp_tool::toml_output;
+use mcp_tool::types::FlatCommand;
 
 /// 读取 help 文件，通过 build_json_generation_prompt -> LLM -> parse_json_response 链路
 /// 生成 ToolDef，再经 toml_output::generate_toml_file 序列化为 TOML 并写入文件。
@@ -11,8 +11,12 @@ async fn main() -> anyhow::Result<()> {
 
     let base_url = std::env::var("LLM_BASE_URL").unwrap_or_else(|_| "http://192.168.0.68:12340/v1".to_string());
     let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "Intel/Qwen3.5-122B-A10B-int4-AutoRound".to_string());
-    let help_path = std::env::args().nth(1).unwrap_or_else(|| "./res/cargo_build_help".to_string());
-    let output_path = std::env::args().nth(2).unwrap_or_else(|| "./tools.d/cargo_build_llm.toml".to_string());
+    let help_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "./res/cargo_build_help".to_string());
+    let output_path = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "./tools.d/cargo_build_llm.toml".to_string());
 
     println!("==> 读取 help 文件: {}", help_path);
     let help_text = tokio::fs::read_to_string(&help_path).await?;
@@ -30,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("==> 命令: {}", cmd_str);
 
-    let schema = mcp_server::config::tool_config_schema();
+    let schema = mcp::config::tool_config_schema();
 
     let flat = FlatCommand {
         full_command: full_command.clone(),

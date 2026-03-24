@@ -1,9 +1,11 @@
-use mcp_server::config::tool::ToolFile;
+use mcp::config::tool::ToolFile;
 
 /// 反序列化 tools.d/cargo_build.toml 并打印结构化内容
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "./tools.d/cargo_build.toml".to_string());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "./tools.d/cargo/cargo_build.toml".to_string());
     println!("==> 读取文件: {}", path);
 
     let content = tokio::fs::read_to_string(&path).await?;

@@ -1,9 +1,8 @@
 use crate::types::{FlatCommand, SubcommandInfo, ToolOutput};
 use async_openai::types::chat::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-    ChatCompletionRequestUserMessageArgs,
+    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
 };
-use mcp_server::config::tool::ToolDef;
+use mcp::config::tool::ToolDef;
 
 pub fn build_subcommand_prompt(command: &str, help_text: &str) -> Vec<ChatCompletionRequestMessage> {
     let system = r#"
@@ -33,10 +32,7 @@ Output format:
 If no commands are found, return an empty array: []
     "#;
 
-    let user = format!(
-        "命令: {}\n\nHelp 输出:\n{}\n\n请列出所有子命令：",
-        command, help_text
-    );
+    let user = format!("命令: {}\n\nHelp 输出:\n{}\n\n请列出所有子命令：", command, help_text);
 
     vec![
         ChatCompletionRequestSystemMessageArgs::default()
@@ -85,17 +81,18 @@ pub fn parse_subcommands_response(response: &str) -> Vec<SubcommandInfo> {
         }
         let cleaned = trimmed.trim_start_matches("- ").trim_start_matches("* ").trim();
         if !cleaned.is_empty() && !cleaned.contains(' ') {
-             cmds.push(SubcommandInfo {
-                 command: cleaned.to_string(),
-                 description: String::new(),
-             });
+            cmds.push(SubcommandInfo {
+                command: cleaned.to_string(),
+                description: String::new(),
+            });
         }
     }
     cmds
 }
 
 pub fn build_json_generation_prompt(command: &FlatCommand, json_schema: &str) -> Vec<ChatCompletionRequestMessage> {
-    let system = format!(r#"You are an MCP tool configuration generator.
+    let system = format!(
+        r#"You are an MCP tool configuration generator.
 Given a CLI command’s --help output, generate a single tool definition that strictly conforms to the provided JSON Schema.
 
 # Output Requirements
@@ -151,7 +148,9 @@ Do NOT include comments, trailing commas, or additional fields not defined in th
 # JSON Schema
 JSON Schema:
 {}
-"#, json_schema);
+"#,
+        json_schema
+    );
 
     let user = format!(
         "命令: {}\n\nHelp 输出:\n{}\n\n请生成该命令对应的单个 tool 定义（JSON）。",
@@ -303,6 +302,9 @@ Hope this helps!"#;
         let params = output.tool_def.parameters.unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "package");
-        assert_eq!(params[0].arg.as_ref().unwrap(), &vec!["-p".to_string(), "${package}".to_string()]);
+        assert_eq!(
+            params[0].arg.as_ref().unwrap(),
+            &vec!["-p".to_string(), "${package}".to_string()]
+        );
     }
 }

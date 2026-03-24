@@ -1,5 +1,5 @@
-use mcp_tool_generator::llm_client::LlmClient;
-use mcp_tool_generator::prompt;
+use mcp_tool::llm_client::LlmClient;
+use mcp_tool::prompt;
 
 /// 测试完整流程：
 /// 1. 用模拟的 help 输出调用 build_subcommand_prompt -> LLM -> parse_subcommands_response

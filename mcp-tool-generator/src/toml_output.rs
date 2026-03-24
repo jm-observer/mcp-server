@@ -1,5 +1,5 @@
 use crate::types::ToolOutput;
-use mcp_server::config::tool::ToolFile;
+use mcp::config::tool::ToolFile;
 
 /// 为单个 tool 生成独立的 TOML 文件内容
 pub fn generate_single_tool_toml(command_name: &str, output: &ToolOutput) -> String {
@@ -71,7 +71,7 @@ fn extract_tool_name(line: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mcp_server::config::tool::{ToolAction, ToolDef};
+    use mcp::config::tool::{ToolAction, ToolDef};
 
     fn make_tool(name: &str, dangerous: bool) -> ToolOutput {
         ToolOutput {
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_with_parameters_and_arg() {
-        use mcp_server::config::tool::ParameterDef;
+        use mcp::config::tool::ParameterDef;
         let output = ToolOutput {
             tool_def: ToolDef {
                 name: "cargo_build".to_string(),

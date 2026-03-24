@@ -1,10 +1,10 @@
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicI64, Ordering};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 pub struct McpClient {
     child: Child,
@@ -83,7 +83,7 @@ impl McpClient {
             Ok(r) => r,
             Err(e) => return Err(anyhow!("Failed to parse response: {} - Original: {}", e, line)),
         };
-        
+
         if let Some(err) = resp.error {
             return Err(anyhow!("JSON-RPC Error: {:?}", err));
         }
@@ -127,7 +127,7 @@ impl McpClient {
         params_obj.insert("command".to_string(), Value::String(command.to_string()));
         let args_val = args.iter().map(|s| Value::String(s.clone())).collect::<Vec<_>>();
         params_obj.insert("args".to_string(), Value::Array(args_val));
-        
+
         if let Some(wd) = working_dir {
             params_obj.insert("working_dir".to_string(), Value::String(wd.to_string()));
         }
@@ -139,37 +139,37 @@ impl McpClient {
 
         let resp = self.send_request("tools/call", run_params).await?;
         if let Some(result) = resp.result {
-             let mut out_text = String::new();
-             let mut is_error = false;
-             if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
-                 for block in content {
-                     if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                         out_text.push_str(text);
-                     }
-                 }
-                 if let Some(err) = result.get("isError").and_then(|e| e.as_bool()) {
-                     is_error = err;
-                 }
-             }
+            let mut out_text = String::new();
+            let mut is_error = false;
+            if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
+                for block in content {
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                        out_text.push_str(text);
+                    }
+                }
+                if let Some(err) = result.get("isError").and_then(|e| e.as_bool()) {
+                    is_error = err;
+                }
+            }
 
-             if is_error {
-                 Ok(CommandOutput {
-                     stdout: "".to_string(),
-                     stderr: out_text,
-                 })
-             } else {
-                 Ok(CommandOutput {
-                     stdout: out_text,
-                     stderr: "".to_string(),
-                 })
-             }
+            if is_error {
+                Ok(CommandOutput {
+                    stdout: "".to_string(),
+                    stderr: out_text,
+                })
+            } else {
+                Ok(CommandOutput {
+                    stdout: out_text,
+                    stderr: "".to_string(),
+                })
+            }
         } else {
-             Err(anyhow!("No result in tools/call response"))
+            Err(anyhow!("No result in tools/call response"))
         }
     }
 
     pub fn get_tool_schema(&self) -> String {
-        mcp_server::config::tool_config_schema()
+        mcp::config::tool_config_schema()
     }
 
     pub async fn close(&mut self) -> Result<()> {

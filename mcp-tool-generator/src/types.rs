@@ -1,4 +1,4 @@
-use mcp_server::config::tool::ToolDef;
+use mcp::config::tool::ToolDef;
 
 #[derive(Debug, Clone)]
 pub struct CommandHelp {

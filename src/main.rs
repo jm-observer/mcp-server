@@ -5,9 +5,9 @@ use log::{
     LevelFilter::{Debug, Info},
     error, info,
 };
-use mcp_server::config::{ServerConfig, ToolFile, ToolRegistry};
-use mcp_server::protocol::McpHandler;
-use mcp_server::transport::sse::SessionManager;
+use mcp::config::{ServerConfig, ToolFile, ToolRegistry};
+use mcp::protocol::McpHandler;
+use mcp::transport::sse::SessionManager;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::fs;
@@ -22,12 +22,12 @@ struct Cli {
     schema: bool,
 
     #[arg(
-        short = 'c',
-        long = "config",
-        default_value = "config.toml",
-        help = "Path to config file"
+        short = 'w',
+        long = "cwd",
+        default_value = "~/.config/mcp",
+        help = "Working directory containing config.toml and tools.d"
     )]
-    config: String,
+    cwd: String,
 
     #[arg(long = "stdio", help = "Run in stdio mode (for CLI integration)")]
     stdio: bool,
@@ -152,11 +152,30 @@ async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
 
     if args.schema {
-        println!("{}", mcp_server::config::tool_config_schema());
+        println!("{}", mcp::config::tool_config_schema());
         return Ok(());
     }
 
-    let config_path = Path::new(&args.config);
+    // Determine workspace directory from the '--cwd' argument, supporting '~' expansion
+    let workspace_path = {
+        let raw = &args.cwd;
+        if raw.starts_with('~') {
+            // Expand leading '~' to the user's home directory
+            let home = std::env::var("HOME").expect("HOME environment variable not set");
+            let mut p = std::path::PathBuf::from(home);
+            // Append the remainder of the path after '~'
+            let sub = raw.trim_start_matches('~');
+            if !sub.is_empty() {
+                p.push(sub.trim_start_matches('/'));
+            }
+            p
+        } else {
+            std::path::PathBuf::from(raw)
+        }
+    };
+    info!("Workspace directory: {}", workspace_path.display());
+    // The config file is expected to be 'config.toml' inside this workspace
+    let config_path = workspace_path.join("config.toml");
     let server_config = if config_path.exists() {
         let content = fs::read_to_string(&config_path)?;
         toml::from_str::<ServerConfig>(&content).expect("Failed to parse config")
@@ -175,12 +194,8 @@ async fn main() -> std::io::Result<()> {
         info!("Builtin direct_command tool registered");
     }
 
-    let config_dir = config_path.parent().unwrap_or(Path::new(""));
-    let tools_dir = if config_dir.as_os_str().is_empty() {
-        Path::new("tools.d").to_path_buf()
-    } else {
-        config_dir.join("tools.d")
-    };
+    // Define tools directory relative to the workspace
+    let tools_dir = workspace_path.join("tools.d");
     if tools_dir.exists() && tools_dir.is_dir() {
         load_tool_files(&tools_dir, &mut registry, server_config.defaults.timeout_secs)?;
     } else {
@@ -190,7 +205,7 @@ async fn main() -> std::io::Result<()> {
     let handler = McpHandler::new(Arc::new(registry), Arc::new(server_config.clone()));
 
     if args.stdio {
-        mcp_server::transport::stdio::run_stdio(Arc::new(handler)).await
+        mcp::transport::stdio::run_stdio(Arc::new(handler)).await
     } else {
         run_sse_server(handler, &server_config).await
     }
