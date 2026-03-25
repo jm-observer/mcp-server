@@ -15,8 +15,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
-#[command(name = "mcp-server")]
-#[command(about = "MCP Server - A Model Context Protocol server implementation")]
+#[command(
+    name = "mcp",
+    version,
+    about = "MCP - A Model Context Protocol server implementation"
+)]
 struct Cli {
     #[arg(long = "schema", help = "Print tool configuration schema (JSON)")]
     schema: bool,
