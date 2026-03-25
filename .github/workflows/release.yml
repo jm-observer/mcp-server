@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          BINS="mcp mcp-client"
+          BINS="mcp mcp-tool"
           for bin in $BINS; do
             SRC="target/${{ matrix.target }}/release/${bin}"
             if [ -f "${SRC}.exe" ]; then SRC="${SRC}.exe"; fi
