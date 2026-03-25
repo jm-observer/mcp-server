@@ -1,9 +1,7 @@
 use crate::config::{RegisteredTool, ToolAction};
-use crate::security::{SecurityError, validate_sub_dir, validate_working_dir};
 use log::info;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 use thiserror::Error;
@@ -13,8 +11,6 @@ use tokio::time::timeout;
 
 #[derive(Error, Debug)]
 pub enum CommandError {
-    #[error("Security error: {0}")]
-    Security(#[from] SecurityError),
     #[error("Template resolution error: {0}")]
     TemplateResolution(String),
     #[error("Tool missing command executable")]
@@ -25,9 +21,7 @@ pub enum CommandError {
     Timeout,
 }
 
-pub struct CommandExecutor {
-    allowed_dirs: Vec<PathBuf>,
-}
+pub struct CommandExecutor;
 
 pub struct CommandResult {
     pub stdout: String,
@@ -36,9 +30,6 @@ pub struct CommandResult {
 }
 
 impl CommandExecutor {
-    pub fn new(allowed_dirs: Vec<PathBuf>) -> Self {
-        Self { allowed_dirs }
-    }
 
     pub fn resolve_template(template: &str, args: &HashMap<String, Value>) -> Result<String, CommandError> {
         let mut result = String::new();
@@ -139,38 +130,12 @@ impl CommandExecutor {
         tool: &RegisteredTool,
         arguments: &HashMap<String, Value>,
     ) -> Result<CommandResult, CommandError> {
-        let (cmd_opt, sub_dir_opt) = match &tool.def.action {
-            ToolAction::Command { command, sub_dir, .. } => (command, sub_dir),
+        let cmd_opt = match &tool.def.action {
+            ToolAction::Command { command, .. } => command,
             _ => return Err(CommandError::MissingCommand),
         };
 
         let t_cmd = cmd_opt.as_ref().ok_or(CommandError::MissingCommand)?;
-
-        // cwd 优先：如果 ToolDef.cwd 为 true，从参数 "cwd" 中取绝对路径
-        // 如果有 working_dir 或 sub_dir 配置，走旧逻辑
-        // 否则不设置 current_dir，继承父进程工作目录
-        let work_dir = if tool.def.cwd {
-            let cwd_str = arguments
-                .get("cwd")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| CommandError::TemplateResolution("cwd parameter is required when cwd=true".into()))?;
-            let cwd_path = std::path::PathBuf::from(cwd_str);
-            validate_working_dir(&cwd_path, &self.allowed_dirs)?;
-            Some(cwd_path)
-        } else if tool.working_dir.is_some() || sub_dir_opt.is_some() {
-            let mut wd = tool
-                .working_dir
-                .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            if let Some(sub_tpl) = sub_dir_opt {
-                let sub_res = Self::resolve_template(sub_tpl, arguments)?;
-                wd = validate_sub_dir(&wd, &sub_res)?;
-            }
-            validate_working_dir(&wd, &self.allowed_dirs)?;
-            Some(wd)
-        } else {
-            None
-        };
 
         let cmd_exec = Self::resolve_template(t_cmd, arguments)?;
         let resolved_args = Self::resolve_parameter_args(tool, arguments)?;
@@ -184,9 +149,6 @@ impl CommandExecutor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
-        if let Some(wd) = work_dir {
-            child_cmd.current_dir(wd);
-        }
 
         let mut child = child_cmd.spawn()?;
 
@@ -268,21 +230,10 @@ impl CommandExecutor {
         &self,
         command: &str,
         args: &[String],
-        working_dir: Option<&std::path::Path>,
     ) -> Result<CommandResult, CommandError> {
-        let work_dir = if let Some(p) = working_dir {
-            validate_working_dir(p, &self.allowed_dirs)?;
-            p.to_path_buf()
-        } else {
-            let cwd = std::env::current_dir().unwrap_or_default();
-            validate_working_dir(&cwd, &self.allowed_dirs)?;
-            cwd
-        };
-
         let mut child_cmd = Command::new(command);
         child_cmd
             .args(args)
-            .current_dir(work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
@@ -378,15 +329,12 @@ mod tests {
                 action: ToolAction::Command {
                     command: Some("cargo".to_string()),
                     args: Some(vec!["build".to_string()]),
-                    sub_dir: Some("${project}".to_string()),
                 },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
                 parameters: Some(parameters),
-                dangerous: false,
             },
-            working_dir: None,
             base_url: None,
             effective_timeout: 60,
             env: HashMap::new(),

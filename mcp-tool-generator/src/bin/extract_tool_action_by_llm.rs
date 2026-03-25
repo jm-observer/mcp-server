@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
     custom_utils::logger::logger_stdout_debug();
 
     let base_url = std::env::var("LLM_BASE_URL").unwrap_or_else(|_| "http://192.168.0.68:12340/v1".to_string());
-    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "Intel/Qwen3.5-122B-A10B-int4-AutoRound".to_string());
+    let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "openai/gpt-oss-120b".to_string());
     let help_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "./res/cargo_build_help".to_string());
@@ -48,7 +48,6 @@ async fn main() -> anyhow::Result<()> {
 
     let tool_output = prompt::parse_json_response(&response, full_command)?;
     println!("==> 解析得到 ToolDef: {:?}\n", tool_output.tool_def);
-    println!("==> dangerous: {}\n", tool_output.tool_def.dangerous);
 
     let final_toml = toml_output::generate_toml_file(&cmd_str, &[tool_output]);
     println!("==> 生成的 TOML:\n{}\n", final_toml);

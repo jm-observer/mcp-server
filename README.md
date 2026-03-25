@@ -15,6 +15,43 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server implem
 
 ## Quick Start
 
+### Simplified Path Management
+
+The server now **ignores custom `--cwd` arguments** and always uses the current working directory as its workspace. Configuration (`config.toml`) and tools (`tools.d/`) are expected to be located relative to the directory where the binary is executed.
+
+### Recommended Docker Deployment
+
+Running the server inside a Docker container is the preferred way to manage file paths and ensure a consistent environment.
+
+```Dockerfile
+FROM rust:latest AS builder
+WORKDIR /usr/src/mcp
+COPY . .
+RUN cargo build --release
+
+FROM debian:buster-slim
+COPY --from=builder /usr/src/mcp/target/release/mcp-server /usr/local/bin/mcp-server
+WORKDIR /app
+COPY config.toml ./
+COPY tools.d ./tools.d
+EXPOSE 3000
+CMD ["mcp-server"]
+```
+
+```bash
+# Build the Docker image
+docker build -t mcp-server .
+# Run the container
+docker run -d -p 3000:3000 \
+    -v $(pwd)/config.toml:/app/config.toml \
+    -v $(pwd)/tools.d:/app/tools.d \
+    --name mcp-server mcp-server
+```
+
+This approach provides filesystem isolation and eliminates the need for manual path handling.
+
+
+
 ### Build
 
 ```bash

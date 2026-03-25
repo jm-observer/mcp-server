@@ -15,9 +15,6 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(config) = &tool_file.config {
         println!("[config]");
-        if let Some(wd) = &config.working_dir {
-            println!("  working_dir = {:?}", wd);
-        }
         if let Some(timeout) = config.timeout_secs {
             println!("  timeout_secs = {}", timeout);
         }

@@ -1,6 +1,5 @@
 use super::types::*;
 use crate::config::{ServerConfig, ToolAction, ToolRegistry};
-use crate::security::validate_path;
 use log::{error, info};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -113,25 +112,6 @@ impl McpHandler {
         for tool in self.registry.list_tools() {
             let mut properties = serde_json::Map::new();
             let mut required = vec![];
-
-            // cwd=true 时，确保 cwd 参数出现在 schema 中
-            if tool.def.cwd {
-                let has_cwd_param = tool
-                    .def
-                    .parameters
-                    .as_ref()
-                    .map_or(false, |p| p.iter().any(|param| param.name == "cwd"));
-                if !has_cwd_param {
-                    let mut cwd_schema = serde_json::Map::new();
-                    cwd_schema.insert("type".into(), Value::String("string".into()));
-                    cwd_schema.insert(
-                        "description".into(),
-                        Value::String("Working directory (absolute path)".into()),
-                    );
-                    properties.insert("cwd".into(), Value::Object(cwd_schema));
-                    required.push(Value::String("cwd".into()));
-                }
-            }
 
             if let Some(params) = &tool.def.parameters {
                 for param in params {
@@ -248,7 +228,7 @@ impl McpHandler {
         }
 
         if call_params.name == "direct_command" {
-            let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
+            let executor = CommandExecutor;
             let cmd_str = provided_args
                 .get("command")
                 .and_then(|v| v.as_str())
@@ -265,12 +245,7 @@ impl McpHandler {
                 parsed_args = s.split_whitespace().map(|s| s.to_string()).collect();
             }
 
-            let wd = provided_args
-                .get("working_dir")
-                .and_then(|v| v.as_str())
-                .map(std::path::Path::new);
-
-            match executor.execute_direct(cmd_str, &parsed_args, wd).await {
+            match executor.execute_direct(cmd_str, &parsed_args).await {
                 Ok(res) => {
                     let mut content = vec![];
                     if !res.stdout.is_empty() {
@@ -319,7 +294,7 @@ impl McpHandler {
                 }
             }
         } else if matches!(tool.def.action, ToolAction::Command { .. }) {
-            let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
+            let executor = CommandExecutor;
             match executor.execute(tool, &provided_args).await {
                 Ok(res) => {
                     let mut content = vec![];
@@ -478,11 +453,6 @@ impl McpHandler {
         };
 
         let path = Path::new(path_str);
-        let allowed = &self.server_config.defaults.allowed_dirs;
-
-        if let Err(e) = validate_path(path, allowed) {
-            return Self::make_tool_error(id, format!("Security error: {}", e));
-        }
 
         let entries = match std::fs::read_dir(path) {
             Ok(e) => e,
@@ -537,11 +507,6 @@ impl McpHandler {
         };
 
         let path = Path::new(path_str);
-        let allowed = &self.server_config.defaults.allowed_dirs;
-
-        if let Err(e) = validate_path(path, allowed) {
-            return Self::make_tool_error(id, format!("Security error: {}", e));
-        }
 
         match std::fs::read_to_string(path) {
             Ok(content) => Self::make_tool_result(
@@ -567,11 +532,6 @@ impl McpHandler {
         };
 
         let path = Path::new(path_str);
-        let allowed = &self.server_config.defaults.allowed_dirs;
-
-        if let Err(e) = validate_path(path, allowed) {
-            return Self::make_tool_error(id, format!("Security error: {}", e));
-        }
 
         // 检查父目录是否存在（不自动创建）
         if let Some(parent) = path.parent() {

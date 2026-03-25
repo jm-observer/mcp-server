@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let cmd_str = full_command.join(" ");
     println!("==> 命令: {}", cmd_str);
 
-    let llm = LlmClient::new("http://127.0.0.1:8082", "Intel/Qwen3.5-122B-A10B-int4-AutoRound");
+    let llm = LlmClient::new("http://127.0.0.1:12340/v1", "openai/gpt-oss-120b");
     let schema = mcp::config::tool_config_schema();
     println!("==> Schema: {schema}");
     let flat = FlatCommand {

@@ -131,14 +131,6 @@ When `cwd` is true, the framework automatically injects a required "cwd" paramet
 
 If the command is location-independent (e.g., system utilities, help, version), set `"cwd": false` or omit it.
 
-# Dangerous Flag Classification
-
-Determine whether the command is dangerous and set the "dangerous" field accordingly:
-
-false: read-only or safe operations (e.g., query, list, read, preview, validate, dry-run, help, version)
-
-true: mutating or side-effect operations (e.g., delete, update, write, commit, send, deploy, install, publish, run, execute)
-
 # Strictness Rules
 
 The output must be valid JSON and fully compliant with the schema.
@@ -257,21 +249,6 @@ Hope this helps!"#;
     fn test_extract_json_no_json() {
         let response = "This response has no JSON at all.";
         assert!(extract_json(response).is_err());
-    }
-
-    #[test]
-    fn test_parse_json_response_with_dangerous() {
-        let response = r#"{"name": "clean", "description": "Clean build artifacts", "type": "command", "command": "cargo", "args": ["clean"], "dangerous": true}"#;
-        let output = parse_json_response(response, vec!["cargo".into(), "clean".into()]).unwrap();
-        assert!(output.tool_def.dangerous);
-        assert_eq!(output.command, vec!["cargo", "clean"]);
-    }
-
-    #[test]
-    fn test_parse_json_response_dangerous_defaults_false() {
-        let response = r#"{"name": "status", "description": "Show status", "type": "command", "command": "git", "args": ["status"]}"#;
-        let output = parse_json_response(response, vec!["git".into(), "status".into()]).unwrap();
-        assert!(!output.tool_def.dangerous);
     }
 
     #[test]

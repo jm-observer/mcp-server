@@ -11,7 +11,7 @@ use mcp::transport::sse::SessionManager;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -175,24 +175,16 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    // Determine workspace directory from the '--cwd' argument, supporting '~' expansion
-    let workspace_path = {
-        let raw = &args.cwd;
-        if raw.starts_with('~') {
-            // Expand leading '~' to the user's home directory
-            let home = std::env::var("HOME").expect("HOME environment variable not set");
-            let mut p = std::path::PathBuf::from(home);
-            // Append the remainder of the path after '~'
-            let sub = raw.trim_start_matches('~');
-            if !sub.is_empty() {
-                p.push(sub.trim_start_matches('/'));
-            }
-            p
-        } else {
-            std::path::PathBuf::from(raw)
-        }
+    let raw_path = args.cwd.clone();
+    let workspace_path = if let Some(stripped) = raw_path.strip_prefix("~/") {
+        let home = std::env::var("HOME").expect("HOME environment variable not set");
+        PathBuf::from(home).join(stripped)
+    } else if raw_path == "~" {
+        PathBuf::from(std::env::var("HOME").expect("HOME environment variable not set"))
+    } else {
+        PathBuf::from(raw_path)
     };
-    info!("Workspace directory: {} {:?}", workspace_path.display(), args);
+    info!("Workspace directory: {}", workspace_path.display());
     // The config file is expected to be 'config.toml' inside this workspace
     let config_path = workspace_path.join("config.toml");
     let server_config = if config_path.exists() {

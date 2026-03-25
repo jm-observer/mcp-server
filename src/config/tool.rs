@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -13,7 +12,6 @@ pub struct ToolFile {
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema, Default)]
 pub struct ToolFileConfig {
-    pub working_dir: Option<String>,
     pub timeout_secs: Option<u64>,
     pub env: Option<HashMap<String, String>>,
     pub base_url: Option<String>,
@@ -34,10 +32,6 @@ pub struct ToolDef {
     pub cwd: bool,
     #[serde(default)]
     pub parameters: Option<Vec<ParameterDef>>,
-    /// LLM 生成阶段标记：该工具是否有副作用。
-    /// 反序列化时缺失则默认 false，序列化到 TOML 时跳过。
-    #[serde(default, skip_serializing)]
-    pub dangerous: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
@@ -46,7 +40,6 @@ pub enum ToolAction {
     Command {
         command: Option<String>,
         args: Option<Vec<String>>,
-        sub_dir: Option<String>,
     },
     Http {
         method: Option<String>,
@@ -61,7 +54,6 @@ impl Default for ToolAction {
         ToolAction::Command {
             command: None,
             args: None,
-            sub_dir: None,
         }
     }
 }
@@ -80,7 +72,6 @@ pub struct ParameterDef {
 #[derive(Debug, Clone)]
 pub struct RegisteredTool {
     pub def: ToolDef,
-    pub working_dir: Option<PathBuf>,
     pub base_url: Option<String>,
     pub effective_timeout: u64,
     pub env: HashMap<String, String>,
@@ -134,12 +125,10 @@ impl ToolRegistry {
             }
             
             // working_dir/base_url 从 config 处继承
-            let working_dir = file_config.working_dir.as_ref().map(PathBuf::from);
             let base_url = file_config.base_url.clone();
             
             let registered = RegisteredTool {
                 def: def.clone(),
-                working_dir,
                 base_url,
                 effective_timeout: timeout,
                 env,
@@ -174,7 +163,6 @@ impl ToolRegistry {
             action: ToolAction::Command {
                 command: None,
                 args: None,
-                sub_dir: None,
             },
             env: None,
             timeout_secs: None,
@@ -202,12 +190,10 @@ impl ToolRegistry {
                     arg: None,
                 },
             ]),
-            dangerous: false,
         };
 
         let registered = RegisteredTool {
             def,
-            working_dir: None,
             base_url: None,
             effective_timeout: 60,
             env: HashMap::new(),
@@ -223,7 +209,7 @@ impl ToolRegistry {
             def: ToolDef {
                 name: "list_dir".to_string(),
                 description: "List files and subdirectories in the specified directory. Path must be an absolute path within allowed_dirs.".to_string(),
-                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                action: ToolAction::Command { command: None, args: None, },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
@@ -236,9 +222,7 @@ impl ToolRegistry {
                         arg: None,
                     },
                 ]),
-                dangerous: false,
             },
-            working_dir: None,
             base_url: None,
             effective_timeout: 60,
             env: HashMap::new(),
@@ -250,7 +234,7 @@ impl ToolRegistry {
             def: ToolDef {
                 name: "read_file".to_string(),
                 description: "Read the content of a file. Path must be an absolute path within allowed_dirs.".to_string(),
-                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                action: ToolAction::Command { command: None, args: None, },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
@@ -263,9 +247,7 @@ impl ToolRegistry {
                         arg: None,
                     },
                 ]),
-                dangerous: false,
             },
-            working_dir: None,
             base_url: None,
             effective_timeout: 60,
             env: HashMap::new(),
@@ -277,7 +259,7 @@ impl ToolRegistry {
             def: ToolDef {
                 name: "write_file".to_string(),
                 description: "Write content to a file (overwrites if exists, creates if not). Path must be an absolute path within allowed_dirs. Parent directory must exist.".to_string(),
-                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                action: ToolAction::Command { command: None, args: None, },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
@@ -297,9 +279,7 @@ impl ToolRegistry {
                         arg: None,
                     },
                 ]),
-                dangerous: false,
             },
-            working_dir: None,
             base_url: None,
             effective_timeout: 60,
             env: HashMap::new(),
@@ -311,14 +291,12 @@ impl ToolRegistry {
             def: ToolDef {
                 name: "list_allowed_dirs".to_string(),
                 description: "List all allowed directories that this server can access. Use this to discover which directories are available for file operations.".to_string(),
-                action: ToolAction::Command { command: None, args: None, sub_dir: None },
+                action: ToolAction::Command { command: None, args: None, },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
                 parameters: None,
-                dangerous: false,
             },
-            working_dir: None,
             base_url: None,
             effective_timeout: 60,
             env: HashMap::new(),

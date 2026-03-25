@@ -9,13 +9,6 @@ pub fn generate_single_tool_toml(command_name: &str, output: &ToolOutput) -> Str
 pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String {
     let all_defs: Vec<_> = outputs.iter().map(|o| o.tool_def.clone()).collect();
 
-    // 记录哪些 tool name 是 dangerous，用于后续插入注释
-    let dangerous_names: std::collections::HashSet<String> = outputs
-        .iter()
-        .filter(|o| o.tool_def.dangerous)
-        .map(|o| o.tool_def.name.clone())
-        .collect();
-
     let tool_file = ToolFile {
         config: None,
         tools: all_defs,
@@ -28,44 +21,8 @@ pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String 
     );
 
     let toml_str = toml::to_string_pretty(&tool_file).unwrap();
-
-    if dangerous_names.is_empty() {
         out.push_str(&toml_str);
         return out;
-    }
-
-    // 逐行扫描，在每个 dangerous tool 的 [[tools]] 前插入注释
-    for line in toml_str.lines() {
-        if line == "[[tools]]" {
-            // 向后看不到 name，先暂存，等下一行判断
-            out.push_str(line);
-            out.push('\n');
-            continue;
-        }
-
-        // 检测 name = "xxx" 行，判断是否 dangerous
-        if let Some(name) = extract_tool_name(line) {
-            if dangerous_names.contains(name) {
-                // 在 [[tools]] 和 name 之间插入 dangerous 注释
-                // 需要回退到 [[tools]] 之前插入
-                // 由于 [[tools]] 已经写入，在 name 行前面插入注释
-                let insert_pos = out.rfind("[[tools]]").unwrap();
-                out.insert_str(insert_pos, "# DANGEROUS: This command may have side effects\n");
-            }
-        }
-
-        out.push_str(line);
-        out.push('\n');
-    }
-
-    out
-}
-
-fn extract_tool_name(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    let rest = trimmed.strip_prefix("name = ")?;
-    let rest = rest.trim_matches('"');
-    Some(rest)
 }
 
 #[cfg(test)]
@@ -73,7 +30,7 @@ mod tests {
     use super::*;
     use mcp::config::tool::{ToolAction, ToolDef};
 
-    fn make_tool(name: &str, dangerous: bool) -> ToolOutput {
+    fn make_tool(name: &str) -> ToolOutput {
         ToolOutput {
             tool_def: ToolDef {
                 name: name.to_string(),
@@ -81,64 +38,14 @@ mod tests {
                 action: ToolAction::Command {
                     command: Some("test".to_string()),
                     args: Some(vec![name.to_string()]),
-                    sub_dir: None,
                 },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
                 parameters: None,
-                dangerous,
             },
             command: vec!["test".to_string(), name.to_string()],
         }
-    }
-
-    #[test]
-    fn test_all_safe_tools() {
-        let outputs = vec![make_tool("list", false), make_tool("show", false)];
-        let toml = generate_toml_file("test", &outputs);
-        assert!(toml.contains("[[tools]]"));
-        assert!(!toml.contains("DANGEROUS"));
-        // 验证生成的 TOML 可被解析
-        let parsed: ToolFile = toml::from_str(&toml).unwrap();
-        assert_eq!(parsed.tools.len(), 2);
-    }
-
-    #[test]
-    fn test_all_dangerous_tools() {
-        let outputs = vec![make_tool("delete", true), make_tool("clean", true)];
-        let toml = generate_toml_file("test", &outputs);
-        // dangerous 工具正常输出，只是前面有注释
-        assert!(toml.contains("[[tools]]"));
-        assert!(toml.contains("# DANGEROUS"));
-        // 注释行不影响 TOML 解析
-        let parsed: ToolFile = toml::from_str(&toml).unwrap();
-        assert_eq!(parsed.tools.len(), 2);
-    }
-
-    #[test]
-    fn test_mixed_safe_and_dangerous() {
-        let outputs = vec![
-            make_tool("list", false),
-            make_tool("delete", true),
-            make_tool("show", false),
-        ];
-        let toml = generate_toml_file("test", &outputs);
-        assert!(toml.contains("[[tools]]"));
-        // dangerous 注释只出现一次（只有 delete 是 dangerous）
-        assert_eq!(toml.matches("# DANGEROUS").count(), 1);
-        // dangerous 不应作为 TOML 字段出现
-        assert!(!toml.contains("dangerous = "));
-        // 所有工具都可解析
-        let parsed: ToolFile = toml::from_str(&toml).unwrap();
-        assert_eq!(parsed.tools.len(), 3);
-    }
-
-    #[test]
-    fn test_dangerous_field_not_in_toml() {
-        let outputs = vec![make_tool("build", false)];
-        let toml = generate_toml_file("test", &outputs);
-        assert!(!toml.contains("dangerous = "));
     }
 
     #[test]
@@ -151,7 +58,6 @@ mod tests {
                 action: ToolAction::Command {
                     command: Some("cargo".to_string()),
                     args: Some(vec!["build".to_string()]),
-                    sub_dir: None,
                 },
                 env: None,
                 timeout_secs: None,
@@ -163,7 +69,6 @@ mod tests {
                     required: false,
                     arg: Some(vec!["-p".to_string(), "${package}".to_string()]),
                 }]),
-                dangerous: false,
             },
             command: vec!["cargo".to_string(), "build".to_string()],
         };
@@ -174,7 +79,6 @@ mod tests {
         // 验证可解析
         let parsed: ToolFile = toml::from_str(&toml).unwrap();
         assert_eq!(parsed.tools.len(), 1);
-        assert!(parsed.tools[0].cwd);
         let params = parsed.tools[0].parameters.as_ref().unwrap();
         assert_eq!(params[0].name, "package");
         assert_eq!(
@@ -185,22 +89,11 @@ mod tests {
 
     #[test]
     fn test_roundtrip_toml_parse() {
-        let outputs = vec![make_tool("status", false)];
+        let outputs = vec![make_tool("status")];
         let toml_str = generate_toml_file("git", &outputs);
         let parsed: ToolFile = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.tools[0].name, "status");
         assert!(!parsed.tools[0].cwd);
         assert!(parsed.config.is_none());
-    }
-
-    #[test]
-    fn test_dangerous_tool_roundtrip() {
-        let outputs = vec![make_tool("delete", true)];
-        let toml_str = generate_toml_file("test", &outputs);
-        assert!(toml_str.contains("# DANGEROUS"));
-        // 即使有注释，TOML 仍可正常解析
-        let parsed: ToolFile = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.tools.len(), 1);
-        assert_eq!(parsed.tools[0].name, "delete");
     }
 }

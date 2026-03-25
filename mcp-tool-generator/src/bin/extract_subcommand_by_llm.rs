@@ -9,9 +9,9 @@ use mcp_tool::prompt;
 async fn main() -> anyhow::Result<()> {
     custom_utils::logger::logger_stdout_debug();
 
-    let base_url = "http://127.0.0.1:8082/v1";
+    let base_url = "http://127.0.0.1:12340/v1";
     // let base_url = "http://192.168.0.68:12340/v1";
-    let model = "Intel/Qwen3.5-122B-A10B-int4-AutoRound";
+    let model = "openai/gpt-oss-120b";
 
     let llm = LlmClient::new(base_url, model);
 
