@@ -1,14 +1,14 @@
 [package]
 name = "mcp"
-version = "0.1.3"
-edition = "2024"
 description = "MCP implementation"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 #license-file = "LICENSE"
-authors = ["fengqi <huangjiemin@gmail.com>"]
+authors.workspace = true
 documentation = "https://docs.rs/mcp"
-homepage = "https://github.com/jm-observer/mcp-server"
-repository = "https://github.com/jm-observer/mcp-server"
+homepage.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "mcp"
@@ -43,3 +43,13 @@ members = [
     "mcp-tool-generator"
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.3"          # ← 这里统一设置你想要的版本
+edition = "2024"           # 推荐也一起继承
+license = "MIT"
+#license-file = "LICENSE"
+authors = ["fengqi <huangjiemin@gmail.com>"]
+documentation = "https://docs.rs/mcp"
+homepage = "https://github.com/jm-observer/mcp-server"
+repository = "https://github.com/jm-observer/mcp-server"
