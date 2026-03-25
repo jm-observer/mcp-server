@@ -1,5 +1,6 @@
 use crate::config::{RegisteredTool, ToolAction};
-use crate::security::{validate_sub_dir, validate_working_dir, SecurityError};
+use crate::security::{SecurityError, validate_sub_dir, validate_working_dir};
+use log::info;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -42,7 +43,7 @@ impl CommandExecutor {
     pub fn resolve_template(template: &str, args: &HashMap<String, Value>) -> Result<String, CommandError> {
         let mut result = String::new();
         let mut chars = template.chars().peekable();
-        
+
         while let Some(c) = chars.next() {
             if c == '$' && chars.peek() == Some(&'{') {
                 chars.next(); // consume '{'
@@ -53,13 +54,18 @@ impl CommandExecutor {
                     }
                     var_name.push(inner_c);
                 }
-                
+
                 if let Some(val) = args.get(&var_name) {
                     match val {
                         Value::String(s) => result.push_str(s),
                         Value::Number(n) => result.push_str(&n.to_string()),
                         Value::Bool(b) => result.push_str(&b.to_string()),
-                        _ => return Err(CommandError::TemplateResolution(format!("Variable {} is not a simple value", var_name))),
+                        _ => {
+                            return Err(CommandError::TemplateResolution(format!(
+                                "Variable {} is not a simple value",
+                                var_name
+                            )));
+                        }
                     }
                 } else {
                     // inner empty string replacement as specified:
@@ -69,16 +75,13 @@ impl CommandExecutor {
                 result.push(c);
             }
         }
-        
+
         Ok(result)
     }
 
-    pub fn resolve_args(
-        templates: &[String],
-        args: &HashMap<String, Value>,
-    ) -> Result<Vec<String>, CommandError> {
+    pub fn resolve_args(templates: &[String], args: &HashMap<String, Value>) -> Result<Vec<String>, CommandError> {
         let mut resolved = Vec::new();
-        
+
         for tpl in templates {
             if tpl.starts_with("${") && tpl.ends_with('}') && tpl.chars().filter(|&c| c == '{').count() == 1 {
                 let var_name = &tpl[2..tpl.len() - 1];
@@ -90,7 +93,7 @@ impl CommandExecutor {
             let res = Self::resolve_template(tpl, args)?;
             resolved.push(res);
         }
-        
+
         Ok(resolved)
     }
 
@@ -137,43 +140,53 @@ impl CommandExecutor {
         arguments: &HashMap<String, Value>,
     ) -> Result<CommandResult, CommandError> {
         let (cmd_opt, sub_dir_opt) = match &tool.def.action {
-            ToolAction::Command {
-                command, sub_dir, ..
-            } => (command, sub_dir),
+            ToolAction::Command { command, sub_dir, .. } => (command, sub_dir),
             _ => return Err(CommandError::MissingCommand),
         };
 
         let t_cmd = cmd_opt.as_ref().ok_or(CommandError::MissingCommand)?;
 
         // cwd 优先：如果 ToolDef.cwd 为 true，从参数 "cwd" 中取绝对路径
-        // 否则 fallback 到旧的 working_dir + sub_dir 逻辑
+        // 如果有 working_dir 或 sub_dir 配置，走旧逻辑
+        // 否则不设置 current_dir，继承父进程工作目录
         let work_dir = if tool.def.cwd {
-            let cwd_str = arguments.get("cwd")
+            let cwd_str = arguments
+                .get("cwd")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| CommandError::TemplateResolution("cwd parameter is required when cwd=true".into()))?;
             let cwd_path = std::path::PathBuf::from(cwd_str);
             validate_working_dir(&cwd_path, &self.allowed_dirs)?;
-            cwd_path
-        } else {
-            let mut wd = tool.working_dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            Some(cwd_path)
+        } else if tool.working_dir.is_some() || sub_dir_opt.is_some() {
+            let mut wd = tool
+                .working_dir
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
             if let Some(sub_tpl) = sub_dir_opt {
                 let sub_res = Self::resolve_template(sub_tpl, arguments)?;
                 wd = validate_sub_dir(&wd, &sub_res)?;
             }
             validate_working_dir(&wd, &self.allowed_dirs)?;
-            wd
+            Some(wd)
+        } else {
+            None
         };
 
         let cmd_exec = Self::resolve_template(t_cmd, arguments)?;
         let resolved_args = Self::resolve_parameter_args(tool, arguments)?;
 
+        info!("{cmd_exec} {resolved_args:?}");
+
         let mut child_cmd = Command::new(cmd_exec);
-        child_cmd.args(resolved_args)
-                 .current_dir(work_dir)
-                 .envs(&tool.env)
-                 .stdout(Stdio::piped())
-                 .stderr(Stdio::piped())
-                 .stdin(Stdio::null());
+        child_cmd
+            .args(resolved_args)
+            .envs(&tool.env)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
+        if let Some(wd) = work_dir {
+            child_cmd.current_dir(wd);
+        }
 
         let mut child = child_cmd.spawn()?;
 
@@ -231,11 +244,7 @@ impl CommandExecutor {
                 err_buf
             };
 
-            let (status, out_bytes, err_bytes) = tokio::join!(
-                child.wait(),
-                out_reader,
-                err_reader
-            );
+            let (status, out_bytes, err_bytes) = tokio::join!(child.wait(), out_reader, err_reader);
 
             let exit_code = status.map(|s| s.code().unwrap_or(1)).unwrap_or(1);
 
@@ -271,11 +280,12 @@ impl CommandExecutor {
         };
 
         let mut child_cmd = Command::new(command);
-        child_cmd.args(args)
-                 .current_dir(work_dir)
-                 .stdout(Stdio::piped())
-                 .stderr(Stdio::piped())
-                 .stdin(Stdio::null());
+        child_cmd
+            .args(args)
+            .current_dir(work_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null());
 
         let mut child = child_cmd.spawn()?;
 
@@ -331,11 +341,7 @@ impl CommandExecutor {
                 err_buf
             };
 
-            let (status, out_bytes, err_bytes) = tokio::join!(
-                child.wait(),
-                out_reader,
-                err_reader
-            );
+            let (status, out_bytes, err_bytes) = tokio::join!(child.wait(), out_reader, err_reader);
 
             let exit_code = status.map(|s| s.code().unwrap_or(1)).unwrap_or(1);
 
@@ -361,7 +367,7 @@ impl CommandExecutor {
 mod tests {
     use super::CommandExecutor;
     use crate::config::{ParameterDef, RegisteredTool, ToolAction, ToolDef};
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::collections::HashMap;
 
     fn sample_tool(parameters: Vec<ParameterDef>) -> RegisteredTool {
@@ -430,10 +436,7 @@ mod tests {
             string_param("package", &["-p", "${package}"]),
             string_param("bin", &["--bin", "${bin}"]),
         ]);
-        let arguments = args_map(&[
-            ("bin", json!("demo-bin")),
-            ("package", json!("demo-pkg")),
-        ]);
+        let arguments = args_map(&[("bin", json!("demo-bin")), ("package", json!("demo-pkg"))]);
 
         let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
 
@@ -454,16 +457,8 @@ mod tests {
     fn only_appends_boolean_args_when_true() {
         let tool = sample_tool(vec![boolean_param("release", &["--release"])]);
 
-        let enabled = CommandExecutor::resolve_parameter_args(
-            &tool,
-            &args_map(&[("release", json!(true))]),
-        )
-        .unwrap();
-        let disabled = CommandExecutor::resolve_parameter_args(
-            &tool,
-            &args_map(&[("release", json!(false))]),
-        )
-        .unwrap();
+        let enabled = CommandExecutor::resolve_parameter_args(&tool, &args_map(&[("release", json!(true))])).unwrap();
+        let disabled = CommandExecutor::resolve_parameter_args(&tool, &args_map(&[("release", json!(false))])).unwrap();
 
         assert_eq!(enabled, vec!["build", "--release"]);
         assert_eq!(disabled, vec!["build"]);
@@ -475,10 +470,7 @@ mod tests {
             metadata_param("project"),
             string_param("package", &["-p", "${package}"]),
         ]);
-        let arguments = args_map(&[
-            ("project", json!("mcp-server")),
-            ("package", json!("demo-pkg")),
-        ]);
+        let arguments = args_map(&[("project", json!("mcp-server")), ("package", json!("demo-pkg"))]);
 
         let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
 
@@ -492,6 +484,9 @@ mod tests {
 
         let err = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap_err();
 
-        assert!(matches!(err, crate::executor::command::CommandError::TemplateResolution(_)));
+        assert!(matches!(
+            err,
+            crate::executor::command::CommandError::TemplateResolution(_)
+        ));
     }
 }

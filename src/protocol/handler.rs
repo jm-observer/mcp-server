@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use std::path::Path;
-use log::{info, error};
-use serde_json::Value;
-use std::collections::HashMap;
+use super::types::*;
 use crate::config::{ServerConfig, ToolAction, ToolRegistry};
 use crate::security::validate_path;
-use super::types::*;
+use log::{error, info};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 pub struct McpHandler {
     registry: Arc<ToolRegistry>,
@@ -116,12 +116,18 @@ impl McpHandler {
 
             // cwd=true 时，确保 cwd 参数出现在 schema 中
             if tool.def.cwd {
-                let has_cwd_param = tool.def.parameters.as_ref()
+                let has_cwd_param = tool
+                    .def
+                    .parameters
+                    .as_ref()
                     .map_or(false, |p| p.iter().any(|param| param.name == "cwd"));
                 if !has_cwd_param {
                     let mut cwd_schema = serde_json::Map::new();
                     cwd_schema.insert("type".into(), Value::String("string".into()));
-                    cwd_schema.insert("description".into(), Value::String("Working directory (absolute path)".into()));
+                    cwd_schema.insert(
+                        "description".into(),
+                        Value::String("Working directory (absolute path)".into()),
+                    );
                     properties.insert("cwd".into(), Value::Object(cwd_schema));
                     required.push(Value::String("cwd".into()));
                 }
@@ -170,19 +176,23 @@ impl McpHandler {
         let call_params: ToolCallParams = match params {
             Some(p) => match serde_json::from_value(p) {
                 Ok(p) => p,
-                Err(e) => return JsonRpcResponse {
+                Err(e) => {
+                    return JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: None,
+                        error: Some(JsonRpcError::invalid_params(&e.to_string())),
+                    };
+                }
+            },
+            None => {
+                return JsonRpcResponse {
                     jsonrpc: "2.0".into(),
                     id: Some(id),
                     result: None,
-                    error: Some(JsonRpcError::invalid_params(&e.to_string())),
-                },
-            },
-            None => return JsonRpcResponse {
-                jsonrpc: "2.0".into(),
-                id: Some(id),
-                result: None,
-                error: Some(JsonRpcError::invalid_params("missing params")),
-            },
+                    error: Some(JsonRpcError::invalid_params("missing params")),
+                };
+            }
         };
 
         let tool = match self.registry.get(&call_params.name) {
@@ -193,15 +203,20 @@ impl McpHandler {
                     jsonrpc: "2.0".into(),
                     id: Some(id),
                     result: None,
-                    error: Some(JsonRpcError::invalid_params(&format!("Tool not found: {}", call_params.name))),
+                    error: Some(JsonRpcError::invalid_params(&format!(
+                        "Tool not found: {}",
+                        call_params.name
+                    ))),
                 };
             }
         };
 
-        info!("Tool matched: {}, action: {:?}", tool.def.name, tool.def.action);
-
         // Validate required params
         let provided_args = call_params.arguments.unwrap_or_default();
+        info!(
+            "Tool matched: {}, action: {:?} {provided_args:?}",
+            tool.def.name, tool.def.action
+        );
         if let Some(defined_params) = &tool.def.parameters {
             for param in defined_params {
                 if param.required && !provided_args.contains_key(&param.name) {
@@ -209,7 +224,10 @@ impl McpHandler {
                         jsonrpc: "2.0".into(),
                         id: Some(id),
                         result: None,
-                        error: Some(JsonRpcError::invalid_params(&format!("Missing required parameter: {}", param.name))),
+                        error: Some(JsonRpcError::invalid_params(&format!(
+                            "Missing required parameter: {}",
+                            param.name
+                        ))),
                     };
                 }
             }
@@ -217,6 +235,8 @@ impl McpHandler {
 
         use crate::executor::command::CommandExecutor;
         use crate::executor::http::HttpExecutor;
+
+        info!("call_params.name: {}", call_params.name);
 
         // 内置文件操作 tool 分发
         match call_params.name.as_str() {
@@ -229,8 +249,11 @@ impl McpHandler {
 
         if call_params.name == "direct_command" {
             let executor = CommandExecutor::new(self.server_config.defaults.allowed_dirs.clone());
-            let cmd_str = provided_args.get("command").and_then(|v| v.as_str()).unwrap_or_default();
-            
+            let cmd_str = provided_args
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+
             let mut parsed_args = Vec::new();
             if let Some(Value::Array(arr)) = provided_args.get("args") {
                 for v in arr {
@@ -241,33 +264,58 @@ impl McpHandler {
             } else if let Some(Value::String(s)) = provided_args.get("args") {
                 parsed_args = s.split_whitespace().map(|s| s.to_string()).collect();
             }
-            
-            let wd = provided_args.get("working_dir").and_then(|v| v.as_str()).map(std::path::Path::new);
+
+            let wd = provided_args
+                .get("working_dir")
+                .and_then(|v| v.as_str())
+                .map(std::path::Path::new);
 
             match executor.execute_direct(cmd_str, &parsed_args, wd).await {
                 Ok(res) => {
                     let mut content = vec![];
                     if !res.stdout.is_empty() {
-                        content.push(ContentBlock { r#type: "text".into(), text: res.stdout });
+                        content.push(ContentBlock {
+                            r#type: "text".into(),
+                            text: res.stdout,
+                        });
                     }
                     if !res.stderr.is_empty() {
-                        content.push(ContentBlock { r#type: "text".into(), text: res.stderr });
+                        content.push(ContentBlock {
+                            r#type: "text".into(),
+                            text: res.stderr,
+                        });
                     }
                     if content.is_empty() {
-                        content.push(ContentBlock { r#type: "text".into(), text: "(Empty Output)".into() });
+                        content.push(ContentBlock {
+                            r#type: "text".into(),
+                            text: "(Empty Output)".into(),
+                        });
                     }
                     let call_result = ToolCallResult {
                         content,
                         is_error: if res.exit_code != 0 { Some(true) } else { None },
                     };
-                    JsonRpcResponse { jsonrpc: "2.0".into(), id: Some(id), result: Some(serde_json::to_value(call_result).unwrap()), error: None }
+                    JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: Some(serde_json::to_value(call_result).unwrap()),
+                        error: None,
+                    }
                 }
                 Err(e) => {
                     let call_result = ToolCallResult {
-                        content: vec![ContentBlock { r#type: "text".into(), text: format!("Execution Error: {}", e) }],
+                        content: vec![ContentBlock {
+                            r#type: "text".into(),
+                            text: format!("Execution Error: {}", e),
+                        }],
                         is_error: Some(true),
                     };
-                    JsonRpcResponse { jsonrpc: "2.0".into(), id: Some(id), result: Some(serde_json::to_value(call_result).unwrap()), error: None }
+                    JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: Some(serde_json::to_value(call_result).unwrap()),
+                        error: None,
+                    }
                 }
             }
         } else if matches!(tool.def.action, ToolAction::Command { .. }) {
@@ -299,10 +347,7 @@ impl McpHandler {
                         is_error = Some(true);
                     }
 
-                    let call_result = ToolCallResult {
-                        content,
-                        is_error,
-                    };
+                    let call_result = ToolCallResult { content, is_error };
 
                     JsonRpcResponse {
                         jsonrpc: "2.0".into(),
@@ -337,13 +382,10 @@ impl McpHandler {
                         r#type: "text".into(),
                         text: res.body,
                     }];
-                    
+
                     let is_error = if res.status >= 400 { Some(true) } else { None };
-                    
-                    let call_result = ToolCallResult {
-                        content,
-                        is_error,
-                    };
+
+                    let call_result = ToolCallResult { content, is_error };
 
                     JsonRpcResponse {
                         jsonrpc: "2.0".into(),
@@ -400,7 +442,10 @@ impl McpHandler {
     fn make_tool_error(id: Value, msg: String) -> JsonRpcResponse {
         Self::make_tool_result(
             id,
-            vec![ContentBlock { r#type: "text".into(), text: msg }],
+            vec![ContentBlock {
+                r#type: "text".into(),
+                text: msg,
+            }],
             Some(true),
         )
     }
@@ -418,7 +463,10 @@ impl McpHandler {
 
         Self::make_tool_result(
             id,
-            vec![ContentBlock { r#type: "text".into(), text }],
+            vec![ContentBlock {
+                r#type: "text".into(),
+                text,
+            }],
             None,
         )
     }
@@ -448,7 +496,13 @@ impl McpHandler {
                     let name = entry.file_name().to_string_lossy().to_string();
                     let file_type = match entry.file_type() {
                         Ok(ft) => {
-                            if ft.is_dir() { "dir" } else if ft.is_file() { "file" } else { "other" }
+                            if ft.is_dir() {
+                                "dir"
+                            } else if ft.is_file() {
+                                "file"
+                            } else {
+                                "other"
+                            }
                         }
                         Err(_) => "unknown",
                     };
@@ -468,7 +522,10 @@ impl McpHandler {
 
         Self::make_tool_result(
             id,
-            vec![ContentBlock { r#type: "text".into(), text }],
+            vec![ContentBlock {
+                r#type: "text".into(),
+                text,
+            }],
             None,
         )
     }
@@ -489,7 +546,10 @@ impl McpHandler {
         match std::fs::read_to_string(path) {
             Ok(content) => Self::make_tool_result(
                 id,
-                vec![ContentBlock { r#type: "text".into(), text: content }],
+                vec![ContentBlock {
+                    r#type: "text".into(),
+                    text: content,
+                }],
                 None,
             ),
             Err(e) => Self::make_tool_error(id, format!("IO error: {}", e)),
@@ -523,7 +583,10 @@ impl McpHandler {
         match std::fs::write(path, content) {
             Ok(_) => Self::make_tool_result(
                 id,
-                vec![ContentBlock { r#type: "text".into(), text: "File written successfully.".into() }],
+                vec![ContentBlock {
+                    r#type: "text".into(),
+                    text: "File written successfully.".into(),
+                }],
                 None,
             ),
             Err(e) => Self::make_tool_error(id, format!("IO error: {}", e)),
