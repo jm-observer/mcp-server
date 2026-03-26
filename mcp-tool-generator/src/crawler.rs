@@ -1,6 +1,6 @@
 use crate::llm_client::LlmClient;
 use crate::prompt;
-use crate::types::{CommandHelp};
+use crate::types::CommandHelp;
 use anyhow::{Result, anyhow, bail};
 use log::{debug, error, trace};
 use std::sync::Arc;
@@ -36,9 +36,7 @@ impl<'a> HelpCrawler<'a> {
     pub async fn crawl(&mut self, command: &str) -> Result<Vec<CommandHelp>> {
         let commands: Vec<&str> = command.split_whitespace().collect();
         Ok(match commands.len() {
-            1 => {
-                self.crawl_command(&[commands[0].to_string()]).await?
-            }
+            1 => self.crawl_command(&[commands[0].to_string()]).await?,
             2 => {
                 vec![crawl_subcommand(&[commands[0].to_string(), commands[1].to_string()]).await?]
             }
@@ -59,7 +57,7 @@ impl<'a> HelpCrawler<'a> {
                 let subcommands = prompt::parse_subcommands_response(&response);
                 log::info!("Found subcommands for {}: {:?}", cmd_str, subcommands);
 
-                if !subcommands.is_empty() {
+                if subcommands.is_empty() {
                     return Ok(nodes);
                 }
                 nodes = vec![];
@@ -98,7 +96,6 @@ impl<'a> HelpCrawler<'a> {
 
         Ok(nodes)
     }
-
 }
 
 pub async fn crawl_subcommand(command_parts: &[String; 2]) -> Result<CommandHelp> {

@@ -1,3 +1,21 @@
+
+[workspace]
+members = [
+    ".",
+    "mcp-tool-generator"
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.6"          # ← 这里统一设置你想要的版本
+edition = "2024"           # 推荐也一起继承
+license = "MIT"
+#license-file = "LICENSE"
+authors = ["fengqi <huangjiemin@gmail.com>"]
+documentation = "https://docs.rs/mcp"
+homepage = "https://github.com/jm-observer/mcp-server"
+repository = "https://github.com/jm-observer/mcp-server"
+
 [package]
 name = "mcp"
 description = "MCP implementation"
@@ -42,20 +60,3 @@ flexi_logger = "0.31.8"
 [features]
 default = []
 prod = ["custom-utils/prod"]
-
-[workspace]
-members = [
-    ".",
-    "mcp-tool-generator"
-]
-resolver = "2"
-
-[workspace.package]
-version = "0.1.5"          # ← 这里统一设置你想要的版本
-edition = "2024"           # 推荐也一起继承
-license = "MIT"
-#license-file = "LICENSE"
-authors = ["fengqi <huangjiemin@gmail.com>"]
-documentation = "https://docs.rs/mcp"
-homepage = "https://github.com/jm-observer/mcp-server"
-repository = "https://github.com/jm-observer/mcp-server"
