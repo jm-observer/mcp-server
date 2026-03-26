@@ -1,11 +1,11 @@
 use crate::llm_client::LlmClient;
 use crate::prompt;
-use crate::types::{CommandHelp, FlatCommand};
-use anyhow::{Result, anyhow};
-use log::debug;
-use std::future::Future;
-use std::pin::Pin;
+use crate::types::{CommandHelp};
+use anyhow::{Result, anyhow, bail};
+use log::{debug, error, trace};
+use std::sync::Arc;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 #[derive(Debug)]
 struct CommandOutput {
@@ -24,8 +24,6 @@ async fn execute_command(cmd: &str, args: &[String]) -> Result<CommandOutput> {
     Ok(CommandOutput { stdout, stderr })
 }
 
-const MAX_DEPTH: usize = 2;
-
 pub struct HelpCrawler<'a> {
     llm_client: &'a LlmClient,
 }
@@ -35,99 +33,115 @@ impl<'a> HelpCrawler<'a> {
         Self { llm_client }
     }
 
-    pub async fn crawl(&mut self, command: &str) -> Result<CommandHelp> {
-        self.crawl_recursive(&[command.to_string()], 0).await
-    }
-
-    fn crawl_recursive<'b>(
-        &'b mut self,
-        command_parts: &'b [String],
-        depth: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<CommandHelp>> + 'b>> {
-        Box::pin(self.crawl_recursive_inner(command_parts, depth))
-    }
-
-    async fn crawl_recursive_inner(&mut self, command_parts: &[String], depth: usize) -> Result<CommandHelp> {
-        let cmd = command_parts[0].clone();
-        let mut args = command_parts[1..].to_vec();
-        args.push("--help".to_string());
-
-        log::info!("Executing: {} {}", cmd, args.join(" "));
-        let output = match execute_command(&cmd, &args).await {
-            Ok(out) => out,
-            Err(e) => {
-                log::warn!("Failed to execute {} {:?}: {}", cmd, args, e);
-                let mut fallback_args = args.clone();
-                if let Some(last) = fallback_args.last_mut() {
-                    *last = "-h".to_string();
-                }
-                match execute_command(&cmd, &fallback_args).await {
-                    Ok(out) => out,
-                    Err(e) => {
-                        log::error!("Failed to execute {} {:?} with -h: {}", cmd, fallback_args, e);
-                        return Err(anyhow!("Command execution failed: {}", e));
-                    }
-                }
+    pub async fn crawl(&mut self, command: &str) -> Result<Vec<CommandHelp>> {
+        let commands: Vec<&str> = command.split_whitespace().collect();
+        Ok(match commands.len() {
+            1 => {
+                self.crawl_command(&[commands[0].to_string()]).await?
             }
-        };
-        debug!("{output:?}");
+            2 => {
+                vec![crawl_subcommand(&[commands[0].to_string(), commands[1].to_string()]).await?]
+            }
+            _ => {
+                bail!(format!("Unsupport number of arguments: {}", commands.len()));
+            }
+        })
+    }
 
-        let help_text = if !output.stdout.trim().is_empty() {
-            output.stdout.clone()
-        } else {
-            output.stderr.clone()
-        };
+    pub async fn crawl_command(&mut self, command_parts: &[String; 1]) -> Result<Vec<CommandHelp>> {
+        let node = crawl(&command_parts[0..]).await?;
+        let cmd_str = command_parts.join(" ");
+        debug!("command_parts {cmd_str}");
+        let prompt = prompt::build_subcommand_prompt(&cmd_str, &node.help_text);
+        let mut nodes = vec![node];
+        match self.llm_client.chat(prompt).await {
+            Ok(response) => {
+                let subcommands = prompt::parse_subcommands_response(&response);
+                log::info!("Found subcommands for {}: {:?}", cmd_str, subcommands);
 
-        if help_text.trim().is_empty() {
-            log::warn!("Command {} {} returned empty output", cmd, args.join(" "));
-            return Err(anyhow!("Empty help output for {} {}", cmd, args.join(" ")));
-        }
-
-        let mut node = CommandHelp {
-            full_command: command_parts.to_vec(),
-            help_text: help_text.clone(),
-            children: Vec::new(),
-        };
-
-        if depth < MAX_DEPTH {
-            let cmd_str = command_parts.join(" ");
-            let prompt = prompt::build_subcommand_prompt(&cmd_str, &help_text);
-
-            match self.llm_client.chat(prompt).await {
-                Ok(response) => {
-                    let subcommands = prompt::parse_subcommands_response(&response);
-                    log::info!("Found subcommands for {}: {:?}", cmd_str, subcommands);
-
-                    for sub in subcommands {
-                        let mut sub_parts = command_parts.to_vec();
-                        sub_parts.push(sub.command);
-                        if let Ok(child_node) = self.crawl_recursive(&sub_parts, depth + 1).await {
-                            node.children.push(child_node);
+                if !subcommands.is_empty() {
+                    return Ok(nodes);
+                }
+                nodes = vec![];
+                let sem = Arc::new(Semaphore::new(5)); // 同时最多 3 个
+                let mut handles = vec![];
+                for sub in subcommands {
+                    let sem = sem.clone();
+                    let subcommand = [command_parts[0].clone(), sub.command];
+                    let handle = tokio::spawn(async move {
+                        // 获取令牌（没有就等待）
+                        let permit = sem.acquire_owned().await.unwrap();
+                        let rs = crawl_subcommand(&subcommand).await;
+                        drop(permit); // 释放令牌（其实自动 drop）
+                        rs
+                    });
+                    handles.push(handle);
+                }
+                for h in handles {
+                    match h.await {
+                        Ok(Ok(ch)) => {
+                            nodes.push(ch);
+                        }
+                        Err(err) => {
+                            error!("Failed to crawl subcommand {}: {}", cmd_str, err);
+                        }
+                        Ok(Err(err)) => {
+                            error!("Failed to crawl subcommand {}: {}", cmd_str, err);
                         }
                     }
                 }
-                Err(e) => {
-                    log::warn!("LLM parsing failed for subcommands of {}: {}", cmd_str, e);
-                }
+            }
+            Err(e) => {
+                log::warn!("LLM parsing failed for subcommands of {}: {}", cmd_str, e);
             }
         }
 
-        Ok(node)
+        Ok(nodes)
     }
 
-    pub fn flatten(root: &CommandHelp) -> Vec<FlatCommand> {
-        let mut result = Vec::new();
-        Self::flatten_recursive(root, &mut result);
-        result
-    }
+}
 
-    fn flatten_recursive(node: &CommandHelp, result: &mut Vec<FlatCommand>) {
-        result.push(FlatCommand {
-            full_command: node.full_command.clone(),
-            help_text: node.help_text.clone(),
-        });
-        for child in &node.children {
-            Self::flatten_recursive(child, result);
+pub async fn crawl_subcommand(command_parts: &[String; 2]) -> Result<CommandHelp> {
+    crawl(&command_parts[0..]).await
+}
+
+async fn crawl(command_parts: &[String]) -> Result<CommandHelp> {
+    let cmd = command_parts[0].clone();
+    let mut args = command_parts[1..].to_vec();
+    args.push("--help".to_string());
+
+    log::info!("Executing: {} {}", cmd, args.join(" "));
+    let output = match execute_command(&cmd, &args).await {
+        Ok(out) => out,
+        Err(e) => {
+            log::warn!("Failed to execute {} {:?}: {}", cmd, args, e);
+            let mut fallback_args = args.clone();
+            if let Some(last) = fallback_args.last_mut() {
+                *last = "-h".to_string();
+            }
+            match execute_command(&cmd, &fallback_args).await {
+                Ok(out) => out,
+                Err(e) => {
+                    log::error!("Failed to execute {} {:?} with -h: {}", cmd, fallback_args, e);
+                    return Err(anyhow!("Command execution failed: {}", e));
+                }
+            }
         }
+    };
+    trace!("{output:?}");
+
+    let help_text = if !output.stdout.trim().is_empty() {
+        output.stdout.clone()
+    } else {
+        output.stderr.clone()
+    };
+    if help_text.trim().is_empty() {
+        log::warn!("Command {} {} returned empty output", cmd, args.join(" "));
+        return Err(anyhow!("Empty help output for {} {}", cmd, args.join(" ")));
     }
+    let node = CommandHelp {
+        full_command: command_parts.to_vec(),
+        help_text: help_text.clone(),
+    };
+    Ok(node)
 }

@@ -278,56 +278,17 @@ impl McpHandler {
                     }
                 }
                 Err(e) => {
-                    let call_result = ToolCallResult {
-                        content: vec![ContentBlock {
-                            r#type: "text".into(),
-                            text: format!("Execution Error: {}", e),
-                        }],
-                        is_error: Some(true),
-                    };
-                    JsonRpcResponse {
-                        jsonrpc: "2.0".into(),
-                        id: Some(id),
-                        result: Some(serde_json::to_value(call_result).unwrap()),
-                        error: None,
-                    }
+                    Self::make_tool_error(id, format!("Execution Error: {}", e))
                 }
             }
         } else if matches!(tool.def.action, ToolAction::Command { .. }) {
             let executor = CommandExecutor;
             match executor.execute(tool, &provided_args).await {
                 Ok(res) => {
-                    let mut content = vec![];
-                    if !res.stdout.is_empty() {
-                        content.push(ContentBlock {
-                            r#type: "text".into(),
-                            text: res.stdout,
-                        });
-                    }
-                    if !res.stderr.is_empty() {
-                        content.push(ContentBlock {
-                            r#type: "text".into(),
-                            text: res.stderr,
-                        });
-                    }
-                    if content.is_empty() {
-                        content.push(ContentBlock {
-                            r#type: "text".into(),
-                            text: "(Empty Output)".into(),
-                        });
-                    }
-
-                    let mut is_error = None;
-                    if res.exit_code != 0 {
-                        is_error = Some(true);
-                    }
-
-                    let call_result = ToolCallResult { content, is_error };
-
                     JsonRpcResponse {
                         jsonrpc: "2.0".into(),
                         id: Some(id),
-                        result: Some(serde_json::to_value(call_result).unwrap()),
+                        result: Some(serde_json::to_value(&res).unwrap()),
                         error: None,
                     }
                 }

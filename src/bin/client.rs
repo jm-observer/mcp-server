@@ -6,7 +6,8 @@
 // server's stdout.
 
 use clap::Parser;
-use serde_json::{Value, json};
+use log::{debug, warn};
+
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -15,33 +16,17 @@ use tokio::process::Command;
 #[derive(Parser, Debug)]
 #[command(author, version, about = "MCP stdio client", long_about = None)]
 struct Args {
-    /// If provided, this raw JSON string is sent directly as the request
-    #[arg(short, long, value_name = "JSON")]
-    request: Option<String>,
-    /// JSON‑RPC method name to invoke (used when --request is not set)
-    method: Option<String>,
-    /// Optional JSON string for parameters (defaults to empty object)
-    #[arg(short, long, default_value = "{}")]
-    params: String,
+    /// JSON‑RPC request to send
+    #[arg(value_name = "JSON")]
+    request: String,
 }
 
 async fn run_client(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    // Determine the request JSON
-    let request_str = if let Some(raw) = args.request {
-        raw
-    } else {
-        // Build request from method and params
-        let method = args.method.unwrap_or_default();
-        let params: Value = serde_json::from_str(&args.params).unwrap_or_else(|_| json!({}));
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": method,
-            "params": params,
-        })
-        .to_string()
-    };
+    let request_str = args.request;
 
+    warn!(
+        "Please make sure compile mcp add feature 'prod'. If you receive normal messages from stderr, please add the 'prod' feature to the mcp server compilation."
+    );
     // Spawn the MCP server in stdio mode
     let mut child = Command::new("./target/debug/mcp")
         .arg("--stdio")
@@ -74,10 +59,8 @@ async fn run_client(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 let mut line = String::new();
                 match err_reader.read_line(&mut line).await {
                     Ok(0) => break,
-                    Ok(_) =>
-                        println!("{line}"),
+                    Ok(_) => debug!("from stderr: {line}"),
                     Err(_) => break,
-
                 }
             }
         });
@@ -87,18 +70,20 @@ async fn run_client(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     match tokio::time::timeout(std::time::Duration::from_secs(300), reader.read_line(&mut response)).await {
         Ok(Ok(_)) => {
             if response.trim().is_empty() {
-                println!("Error: server returned empty response");
+                debug!("Error: server returned empty response");
             } else {
-                println!("{}", response.trim_end());
+                debug!("response {}", response.trim_end());
             }
         }
-        Ok(Err(e)) => println!("Error reading response: {}", e),
-        Err(_) => println!("Error: timeout waiting for server response"),
+        Ok(Err(e)) => debug!("Error reading response: {}", e),
+        Err(_) => debug!("Error: timeout waiting for server response"),
     }
     // 读完响应后关闭 stdin，让服务端退出
     drop(child_stdin);
 
-    let _ = child.wait().await;
+    debug!("end");
+
+    // let _ = child.wait().await;
     Ok(())
 }
 
@@ -106,17 +91,10 @@ async fn run_client(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse CLI arguments
     let args = Args::parse();
+    custom_utils::logger::logger_stdout_debug();
     // Run client logic in a separate async task
-    run_client_task(args).await
-}
-
-// Helper function to spawn the client task asynchronously
-async fn run_client_task(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    let handle = tokio::spawn(async move {
-        if let Err(err) = run_client(args).await {
-            println!("Client error: {err}");
-        }
-    });
-    handle.await.map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
+    if let Err(err) = run_client(args).await {
+        debug!("Client error: {err}");
+    }
     Ok(())
 }

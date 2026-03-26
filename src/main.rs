@@ -158,17 +158,7 @@ fn load_tool_files(dir: &Path, registry: &mut ToolRegistry, default_timeout: u64
 async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
 
-    if args.stdio {
-        // stdio 模式：日志必须写到 stderr，stdout 专用于 JSON-RPC 通信
-        use flexi_logger::{Logger, WriteMode};
-        let _ = Logger::try_with_str("info")
-            .unwrap()
-            .write_mode(WriteMode::Direct)
-            .log_to_stderr()
-            .start();
-    } else {
-        let _ = custom_utils::logger::logger_feature("mcp-server", Debug, Info, false).build();
-    }
+    let _ = custom_utils::logger::logger_feature("mcp-server", Debug, Info, false).build();
 
     if args.schema {
         println!("{}", mcp::config::tool_config_schema());

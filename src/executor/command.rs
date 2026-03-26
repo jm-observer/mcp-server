@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Duration;
+use serde::Serialize;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -23,6 +24,7 @@ pub enum CommandError {
 
 pub struct CommandExecutor;
 
+#[derive(Serialize)]
 pub struct CommandResult {
     pub stdout: String,
     pub stderr: String,

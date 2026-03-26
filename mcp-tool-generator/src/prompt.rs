@@ -1,4 +1,4 @@
-use crate::types::{FlatCommand, SubcommandInfo, ToolOutput};
+use crate::types::{CommandHelp, SubcommandInfo, ToolOutput};
 use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
 };
@@ -90,7 +90,7 @@ pub fn parse_subcommands_response(response: &str) -> Vec<SubcommandInfo> {
     cmds
 }
 
-pub fn build_json_generation_prompt(command: &FlatCommand, json_schema: &str) -> Vec<ChatCompletionRequestMessage> {
+pub fn build_json_generation_prompt(command: &CommandHelp, json_schema: &str) -> Vec<ChatCompletionRequestMessage> {
     let system = format!(
         r#"You are an MCP tool configuration generator.
 Given a CLI command’s --help output, generate a single tool definition that strictly conforms to the provided JSON Schema.

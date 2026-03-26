@@ -4,8 +4,9 @@ use async_openai::{
     config::OpenAIConfig,
     types::chat::{ChatCompletionRequestMessage, CreateChatCompletionRequestArgs},
 };
-use log::{debug, info};
+use log::trace;
 
+#[derive(Clone)]
 pub struct LlmClient {
     client: Client<OpenAIConfig>,
     model: String,
@@ -27,16 +28,16 @@ impl LlmClient {
     }
 
     pub async fn chat(&self, messages: Vec<ChatCompletionRequestMessage>) -> Result<String> {
-        debug!("Sending chat request with model: {}", self.model);
+        trace!("Sending chat request with model: {}", self.model);
         for msg in &messages {
-            debug!("{:?}", msg);
+            trace!("{:?}", msg);
         }
 
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
             .messages(messages)
             .temperature(0.1)
-            .max_tokens(10000u32)
+            .max_tokens(100000u32)
             .build()?;
 
         let response = self
@@ -46,20 +47,20 @@ impl LlmClient {
             .await
             .map_err(|e| anyhow!("LLM API error: {}", e))?;
 
-        debug!("chat resp: {:?}", response);
+        trace!("chat resp: {:?}", response);
         let content = response
             .choices
             .first()
             .ok_or_else(|| anyhow!("Empty choices in LLM response"))?;
         if let Some(reason) = content.finish_reason {
-            info!("chat end{reason:?}");
+            trace!("chat end{reason:?}");
         }
 
         let content = response
             .choices
             .first()
             .and_then(|c| {
-                debug!("choice response: {:?}", c);
+                trace!("choice response: {:?}", c);
                 c.message.content.as_deref()
             })
             .ok_or_else(|| anyhow!("Empty choices in LLM response"))?

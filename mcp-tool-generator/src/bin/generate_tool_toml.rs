@@ -1,7 +1,7 @@
 use mcp_tool::llm_client::LlmClient;
 use mcp_tool::prompt;
 use mcp_tool::toml_output;
-use mcp_tool::types::FlatCommand;
+use mcp_tool::types::CommandHelp;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
     let llm = LlmClient::new("http://127.0.0.1:12340/v1", "openai/gpt-oss-120b");
     let schema = mcp::config::tool_config_schema();
     println!("==> Schema: {schema}");
-    let flat = FlatCommand {
+    let flat = CommandHelp {
         full_command: full_command.clone(),
         help_text,
     };

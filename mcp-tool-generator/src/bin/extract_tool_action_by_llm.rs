@@ -1,7 +1,7 @@
 use mcp_tool::llm_client::LlmClient;
 use mcp_tool::prompt;
 use mcp_tool::toml_output;
-use mcp_tool::types::FlatCommand;
+use mcp_tool::types::CommandHelp;
 
 /// 读取 help 文件，通过 build_json_generation_prompt -> LLM -> parse_json_response 链路
 /// 生成 ToolDef，再经 toml_output::generate_toml_file 序列化为 TOML 并写入文件。
@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
 
     let schema = mcp::config::tool_config_schema();
 
-    let flat = FlatCommand {
+    let flat = CommandHelp {
         full_command: full_command.clone(),
         help_text,
     };
