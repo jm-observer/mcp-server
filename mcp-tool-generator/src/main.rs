@@ -7,7 +7,8 @@ pub mod types;
 
 use crate::crawler::HelpCrawler;
 use crate::llm_client::LlmClient;
-use anyhow::Result;
+use crate::types::CommandHelp;
+use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use log::LevelFilter::Info;
 use log::error;
@@ -15,6 +16,33 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::Semaphore;
+
+// Generate a tool file for a single command
+async fn generate_tool_for_cmd(
+    llm: LlmClient,
+    cmd: &CommandHelp,
+    schema: &str,
+    out_dir: PathBuf,
+    sem: Arc<Semaphore>,
+) -> anyhow::Result<()> {
+    let _permit = sem.acquire_owned().await.unwrap();
+    // Build the prompt for JSON generation
+    let prompt = prompt::build_json_generation_prompt(&cmd, schema);
+    // Call the LLM
+    let resp = llm.chat(prompt).await?;
+    // Parse the JSON response into a ToolOutput
+    let tool_output = prompt::parse_json_response(&resp, cmd.full_command.clone())?;
+    // Generate TOML content
+    let cmd_label = cmd.full_command.join(" ");
+    let toml_content = toml_output::generate_single_tool_toml(&cmd_label, &tool_output);
+    // Determine file name and path
+    let file_name = format!("{}.toml", cmd.full_command.join("-"));
+    let file_path = out_dir.join(&file_name);
+    // Write the TOML file
+    fs::write(&file_path, &toml_content).await?;
+    log::info!("Written: {}", file_path.display());
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -54,36 +82,13 @@ async fn main() -> Result<()> {
         let sem = sem.clone();
         let out_dir = out_dir.clone();
         let llm = llm.clone();
-        let prompt = prompt::build_json_generation_prompt(&cmd, &schema);
+        let schema = schema.clone();
         let handle = tokio::spawn(async move {
-            log::info!("Generating tool definition for: {}", cmd.full_command.join(" "));
-            // 获取令牌（没有就等待）
-            let _permit = sem.acquire_owned().await.unwrap();
-            match llm.chat(prompt).await {
-                Ok(resp) => match prompt::parse_json_response(&resp, cmd.full_command.clone()) {
-                    Ok(tool_output) => {
-                        let cmd_label = cmd.full_command.join(" ");
-                        let toml_content = toml_output::generate_single_tool_toml(&cmd_label, &tool_output);
-                        let file_name = format!("{}.toml", cmd.full_command.join("-"));
-                        let file_path = out_dir.join(&file_name);
-                        if let Err(err) = fs::write(&file_path, &toml_content).await {
-                            error!(
-                                "Failed to write toml output for {}: {}",
-                                cmd.full_command.join(" "),
-                                err
-                            );
-                        } else {
-                            log::info!("Written: {}", file_path.display());
-                        }
-                    }
-                    Err(e) => log::error!(
-                        "Failed to parse LLM response for '{}': {}",
-                        cmd.full_command.join(" "),
-                        e
-                    ),
-                },
-                Err(e) => log::error!("LLM call failed for '{}': {}", cmd.full_command.join(" "), e),
+            // Acquire semaphore permit
+            if let Err(e) = generate_tool_for_cmd(llm, &cmd, &schema, out_dir, sem).await {
+                bail!("Failed to generate tool for '{}': {}", cmd.full_command.join(" "), e);
             }
+            Ok(())
         });
         handles.push(handle);
     }
@@ -93,13 +98,14 @@ async fn main() -> Result<()> {
     for h in handles {
         if let Err(err) = h.await {
             error!("Failed to build_json {}", err);
+            eprintln!("Failed to build_json {}", err);
             generated_fail_count += 1;
         } else {
             generated_count += 1;
         }
     }
 
-    log::info!(
+    println!(
         "Generated {} tool files in {}, failed: {}",
         generated_count,
         out_dir.display(),

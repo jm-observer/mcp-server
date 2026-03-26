@@ -21,8 +21,8 @@ pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String 
     );
 
     let toml_str = toml::to_string_pretty(&tool_file).unwrap();
-        out.push_str(&toml_str);
-        return out;
+    out.push_str(&toml_str);
+    return out;
 }
 
 #[cfg(test)]
