@@ -1,10 +1,10 @@
 use crate::config::{RegisteredTool, ToolAction};
 use log::info;
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Duration;
-use serde::Serialize;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -32,7 +32,6 @@ pub struct CommandResult {
 }
 
 impl CommandExecutor {
-
     pub fn resolve_template(template: &str, args: &HashMap<String, Value>) -> Result<String, CommandError> {
         let mut result = String::new();
         let mut chars = template.chars().peekable();
@@ -228,11 +227,7 @@ impl CommandExecutor {
         }
     }
 
-    pub async fn execute_direct(
-        &self,
-        command: &str,
-        args: &[String],
-    ) -> Result<CommandResult, CommandError> {
+    pub async fn execute_direct(&self, command: &str, args: &[String]) -> Result<CommandResult, CommandError> {
         let mut child_cmd = Command::new(command);
         child_cmd
             .args(args)

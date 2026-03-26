@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -77,6 +77,7 @@ pub struct RegisteredTool {
     pub env: HashMap<String, String>,
 }
 
+#[derive(Debug, Default)]
 pub struct ToolRegistry {
     tools: HashMap<String, RegisteredTool>,
 }
@@ -89,9 +90,7 @@ pub enum ToolError {
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self {
-            tools: HashMap::new(),
-        }
+        Self { tools: HashMap::new() }
     }
 
     pub fn register(&mut self, file: ToolFile, global_timeout: u64) -> Result<(), ToolError> {
@@ -123,10 +122,10 @@ impl ToolRegistry {
                     env.insert(k.clone(), v.clone());
                 }
             }
-            
+
             // working_dir/base_url 从 config 处继承
             let base_url = file_config.base_url.clone();
-            
+
             let registered = RegisteredTool {
                 def: def.clone(),
                 base_url,
@@ -139,19 +138,23 @@ impl ToolRegistry {
 
         Ok(())
     }
-    
+
     pub fn get(&self, name: &str) -> Option<&RegisteredTool> {
         self.tools.get(name)
     }
-    
+
     pub fn list_tools(&self) -> impl Iterator<Item = &RegisteredTool> {
         self.tools.values()
     }
-    
+
     pub fn len(&self) -> usize {
         self.tools.len()
     }
-    
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+
     pub fn tool_names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
@@ -208,20 +211,22 @@ impl ToolRegistry {
         let list_dir = RegisteredTool {
             def: ToolDef {
                 name: "list_dir".to_string(),
-                description: "List files and subdirectories in the specified directory. Path must be an absolute path within allowed_dirs.".to_string(),
-                action: ToolAction::Command { command: None, args: None, },
+                description: "List files and subdirectories in the specified directory. Path must be an absolute path."
+                    .to_string(),
+                action: ToolAction::Command {
+                    command: None,
+                    args: None,
+                },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
-                parameters: Some(vec![
-                    ParameterDef {
-                        name: "path".to_string(),
-                        description: "Absolute path of the target directory".to_string(),
-                        r#type: "string".to_string(),
-                        required: true,
-                        arg: None,
-                    },
-                ]),
+                parameters: Some(vec![ParameterDef {
+                    name: "path".to_string(),
+                    description: "Absolute path of the target directory".to_string(),
+                    r#type: "string".to_string(),
+                    required: true,
+                    arg: None,
+                }]),
             },
             base_url: None,
             effective_timeout: 60,
@@ -233,20 +238,21 @@ impl ToolRegistry {
         let read_file = RegisteredTool {
             def: ToolDef {
                 name: "read_file".to_string(),
-                description: "Read the content of a file. Path must be an absolute path within allowed_dirs.".to_string(),
-                action: ToolAction::Command { command: None, args: None, },
+                description: "Read the content of a file. Path must be an absolute path.".to_string(),
+                action: ToolAction::Command {
+                    command: None,
+                    args: None,
+                },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
-                parameters: Some(vec![
-                    ParameterDef {
-                        name: "path".to_string(),
-                        description: "Absolute path of the file to read".to_string(),
-                        r#type: "string".to_string(),
-                        required: true,
-                        arg: None,
-                    },
-                ]),
+                parameters: Some(vec![ParameterDef {
+                    name: "path".to_string(),
+                    description: "Absolute path of the file to read".to_string(),
+                    r#type: "string".to_string(),
+                    required: true,
+                    arg: None,
+                }]),
             },
             base_url: None,
             effective_timeout: 60,
@@ -258,7 +264,7 @@ impl ToolRegistry {
         let write_file = RegisteredTool {
             def: ToolDef {
                 name: "write_file".to_string(),
-                description: "Write content to a file (overwrites if exists, creates if not). Path must be an absolute path within allowed_dirs. Parent directory must exist.".to_string(),
+                description: "Write content to a file (overwrites if exists, creates if not). Path must be an absolute path. Parent directory must exist.".to_string(),
                 action: ToolAction::Command { command: None, args: None, },
                 env: None,
                 timeout_secs: None,
@@ -290,7 +296,7 @@ impl ToolRegistry {
         let list_allowed_dirs = RegisteredTool {
             def: ToolDef {
                 name: "list_allowed_dirs".to_string(),
-                description: "List all allowed directories that this server can access. Use this to discover which directories are available for file operations.".to_string(),
+                description: "List all configured directories and their usage descriptions. This helps the client discover which directories are available for file operations.".to_string(),
                 action: ToolAction::Command { command: None, args: None, },
                 env: None,
                 timeout_secs: None,

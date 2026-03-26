@@ -1,8 +1,8 @@
 use crate::protocol::McpHandler;
+use log::{error, info};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use log::{error, info};
 
 pub async fn run_stdio(handler: Arc<McpHandler>) -> std::io::Result<()> {
     let stdin = tokio::io::stdin();
@@ -10,7 +10,7 @@ pub async fn run_stdio(handler: Arc<McpHandler>) -> std::io::Result<()> {
     let mut lines = reader.lines();
     info!("Starting stdio server...");
 
-    // 建立一个响应发送通道，专用于将并发处理结果串行安全写入 stdout 
+    // 建立一个响应发送通道，专用于将并发处理结果串行安全写入 stdout
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
     // 独立的 Writer 任务，防止并发下的换行数据错乱
@@ -34,10 +34,10 @@ pub async fn run_stdio(handler: Arc<McpHandler>) -> std::io::Result<()> {
             continue;
         }
         info!("Received stdio request: {}", line);
-        
+
         let handler_clone = handler.clone();
         let tx_clone = tx.clone();
-        
+
         tokio::spawn(async move {
             if let Some(response) = handler_clone.handle_request(&line).await {
                 info!("Stdio handler produced response: {}", response);

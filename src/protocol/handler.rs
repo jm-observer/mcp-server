@@ -79,6 +79,18 @@ impl McpHandler {
     }
 
     fn handle_initialize(&self, id: Value) -> JsonRpcResponse {
+        let dirs = &self.server_config.defaults.directories;
+        let instructions = if dirs.is_empty() {
+            None
+        } else {
+            let text: String = dirs
+                .iter()
+                .map(|d| d.description.trim().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(text)
+        };
+
         let result = InitializeResult {
             protocol_version: "2025-03-26".into(),
             capabilities: ServerCapabilities {
@@ -88,6 +100,7 @@ impl McpHandler {
                 name: "mcp-server".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
             },
+            instructions,
         };
 
         JsonRpcResponse {
@@ -277,21 +290,17 @@ impl McpHandler {
                         error: None,
                     }
                 }
-                Err(e) => {
-                    Self::make_tool_error(id, format!("Execution Error: {}", e))
-                }
+                Err(e) => Self::make_tool_error(id, format!("Execution Error: {}", e)),
             }
         } else if matches!(tool.def.action, ToolAction::Command { .. }) {
             let executor = CommandExecutor;
             match executor.execute(tool, &provided_args).await {
-                Ok(res) => {
-                    JsonRpcResponse {
-                        jsonrpc: "2.0".into(),
-                        id: Some(id),
-                        result: Some(serde_json::to_value(&res).unwrap()),
-                        error: None,
-                    }
-                }
+                Ok(res) => JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: Some(serde_json::to_value(&res).unwrap()),
+                    error: None,
+                },
                 Err(e) => {
                     // Convert execution error to ToolCallResult error message
                     let call_result = ToolCallResult {
@@ -387,12 +396,12 @@ impl McpHandler {
     }
 
     fn handle_builtin_list_allowed_dirs(&self, id: Value) -> JsonRpcResponse {
-        let dirs = &self.server_config.defaults.allowed_dirs;
+        let dirs = &self.server_config.defaults.directories;
         let text = if dirs.is_empty() {
             "(no allowed directories configured)".to_string()
         } else {
             dirs.iter()
-                .map(|d| d.to_string_lossy().to_string())
+                .map(|d| format!("{} - {}", d.path.to_string_lossy(), d.description))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
@@ -495,10 +504,8 @@ impl McpHandler {
         let path = Path::new(path_str);
 
         // 检查父目录是否存在（不自动创建）
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                return Self::make_tool_error(id, format!("Parent directory does not exist: {}", parent.display()));
-            }
+        if let Some(parent) = path.parent().filter(|p| !p.exists()) {
+            return Self::make_tool_error(id, format!("Parent directory does not exist: {}", parent.display()));
         }
 
         match std::fs::write(path, content) {

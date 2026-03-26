@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use tokio::sync::mpsc;
 
+#[derive(Default)]
 pub struct SessionManager {
     sessions: DashMap<String, mpsc::UnboundedSender<String>>,
 }
@@ -24,6 +25,7 @@ impl SessionManager {
             if tx.send(message).is_err() {
                 return Err("Failed to send message over channel");
             }
+
             Ok(())
         } else {
             Err("Session not found")

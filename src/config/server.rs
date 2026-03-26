@@ -19,6 +19,7 @@ pub struct ServerSection {
     pub port: u16,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -51,14 +52,14 @@ pub struct DefaultsSection {
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
     #[serde(default)]
-    pub allowed_dirs: Vec<PathBuf>,
+    pub directories: Vec<DirectoryConfig>,
 }
 
 impl Default for DefaultsSection {
     fn default() -> Self {
         Self {
             timeout_secs: default_timeout(),
-            allowed_dirs: vec![],
+            directories: vec![],
         }
     }
 }
@@ -73,6 +74,13 @@ pub struct SecuritySection {
     pub allow_direct_command: bool,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct DirectoryConfig {
+    pub path: PathBuf,
+    pub description: String,
+}
+
+#[allow(clippy::derivable_impls)]
 impl Default for SecuritySection {
     fn default() -> Self {
         Self {

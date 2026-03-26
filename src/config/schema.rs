@@ -1,6 +1,6 @@
-use schemars::schema_for;
-use crate::config::ToolDef;
 use super::tool::ToolFile;
+use crate::config::ToolDef;
+use schemars::schema_for;
 
 pub fn tool_file_config_schema() -> String {
     let schema = schema_for!(ToolFile);

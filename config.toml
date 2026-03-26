@@ -4,7 +4,13 @@ port = 3000
 
 [defaults]
 timeout_secs = 600
-allowed_dirs = ["D:\\git"]
+[[defaults.directories]]
+path = "D:\\git\\orders"
+description = "\n  你正在访问公司内部文件系统。\n  - /data/orders：电商订单，归属销售部，实时写入，敏感\n"
+
+[[defaults.directories]]
+path = "D:\\git\\reports"
+description = "\n  - /data/reports：财务报表，仅限财务部，月度更新\n"
 
 [security]
 allow_direct_command = true
