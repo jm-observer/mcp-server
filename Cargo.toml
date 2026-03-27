@@ -36,7 +36,12 @@ path = "src/main.rs"
 name = "mcp-client"
 path = "src/bin/client_stdio.rs"
 
+[[bin]]
+name = "client-sse"
+path = "src/bin/client_sse.rs"
+
 [dependencies]
+anyhow = "1.0"
 actix-web = "4.13.0"
 async-stream = "0.3.6"
 bytes = "1.11.1"

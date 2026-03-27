@@ -1671,6 +1671,7 @@ name = "mcp"
 version = "0.1.7"
 dependencies = [
  "actix-web",
+ "anyhow",
  "async-stream",
  "bytes",
  "clap",
