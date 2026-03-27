@@ -44,6 +44,61 @@ async fn generate_tool_for_cmd(
     Ok(())
 }
 
+// Generate tools for all commands using a separate async function
+async fn generate_tools(llm: &LlmClient, help_tree: &[CommandHelp], out_dir: &PathBuf) -> anyhow::Result<()> {
+    // Get JSON Schema for tool definitions
+    let schema = mcp::config::tool_config_schema();
+    let sem = Arc::new(Semaphore::new(5));
+    let mut handles = Vec::with_capacity(help_tree.len());
+    for cmd in help_tree.iter() {
+        let sem = sem.clone();
+        let out_dir = out_dir.clone();
+        let llm = llm.clone();
+        let schema = schema.clone();
+        let cmd = cmd.clone();
+        let handle = tokio::spawn(async move {
+            if let Err(e) = generate_tool_for_cmd(llm, &cmd, &schema, out_dir, sem).await {
+                bail!("Failed to generate tool for '{}': {}", cmd.full_command.join(" "), e);
+            }
+            Ok(())
+        });
+        handles.push(handle);
+    }
+    let mut generated_count = 0;
+    let mut generated_fail_count = 0;
+    for h in handles {
+        if let Err(err) = h.await {
+            error!("Failed to generate tool: {}", err);
+            generated_fail_count += 1;
+        } else {
+            generated_count += 1;
+        }
+    }
+    println!(
+        "Generated {} tool files in {}, failed: {}",
+        generated_count,
+        out_dir.display(),
+        generated_fail_count
+    );
+    Ok(())
+}
+
+fn resolve_path(path: &str) -> Result<PathBuf> {
+    let path = path.trim();
+    if path == "." || path.is_empty() {
+        return Ok(std::env::current_dir()?);
+    }
+    if path == "~" {
+        let home = std::env::var("HOME").map_err(|_| anyhow!("HOME environment variable not set"))?;
+        return Ok(PathBuf::from(home));
+    }
+    if let Some(stripped) = path.strip_prefix("~/") {
+        let home = std::env::var("HOME").map_err(|_| anyhow!("HOME environment variable not set"))?;
+        return Ok(PathBuf::from(home).join(stripped));
+    }
+    Ok(PathBuf::from(path))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = custom_utils::logger::logger_feature("mcp-tool", "debug,hyper_util=info,reqwest=info", Info, false).build();
@@ -54,62 +109,21 @@ async fn main() -> Result<()> {
     let mut crawler = HelpCrawler::new(&llm);
     let help_tree = crawler.crawl(&args.command_name).await?;
 
-    let workspace = if let Some(stripped) = args.workspace.strip_prefix("~/") {
-        let home = std::env::var("HOME").expect("HOME environment variable not set");
-        PathBuf::from(home).join(stripped)
-    } else if args.workspace == "~" {
-        PathBuf::from(std::env::var("HOME").expect("HOME environment variable not set"))
-    } else {
-        PathBuf::from(args.workspace)
-    };
+    let workspace = resolve_path(&args.workspace)?;
     log::info!(
         "Starting tool generator for command: {} workspace: {}",
         args.command_name,
         workspace.display()
     );
 
-    // 5. 创建输出目录: output_dir/command_name/
-    let out_dir = workspace.join("tools.d").join(&args.command_name);
+    // Core generation logic moved to a separate function for reuse
+    let command_name = args.command_name.split_whitespace().next().unwrap_or(&args.command_name);
+    let out_dir = workspace.join("tools.d").join(command_name);
+    // Ensure the output directory exists
     fs::create_dir_all(&out_dir).await?;
     log::info!("Output directory: {}", out_dir.display());
 
-    // 6. Get JSON Schema for tool definitions
-    let schema = mcp::config::tool_config_schema();
-    // 7. 对每个命令生成 tool 定义并写入独立文件
-    let sem = Arc::new(Semaphore::new(5));
-    let mut handles = Vec::with_capacity(help_tree.len());
-    for cmd in help_tree {
-        let sem = sem.clone();
-        let out_dir = out_dir.clone();
-        let llm = llm.clone();
-        let schema = schema.clone();
-        let handle = tokio::spawn(async move {
-            // Acquire semaphore permit
-            if let Err(e) = generate_tool_for_cmd(llm, &cmd, &schema, out_dir, sem).await {
-                bail!("Failed to generate tool for '{}': {}", cmd.full_command.join(" "), e);
-            }
-            Ok(())
-        });
-        handles.push(handle);
-    }
-
-    let mut generated_count = 0;
-    let mut generated_fail_count = 0;
-    for h in handles {
-        if let Err(err) = h.await {
-            error!("Failed to build_json {}", err);
-            eprintln!("Failed to build_json {}", err);
-            generated_fail_count += 1;
-        } else {
-            generated_count += 1;
-        }
-    }
-
-    println!(
-        "Generated {} tool files in {}, failed: {}",
-        generated_count,
-        out_dir.display(),
-        generated_fail_count
-    );
+    // Generate tool files for each command
+    generate_tools(&llm, &help_tree, &out_dir).await?;
     Ok(())
 }
