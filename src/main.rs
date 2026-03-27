@@ -73,6 +73,9 @@ async fn sse_connect(req: actix_web::HttpRequest, state: web::Data<AppState>) ->
                     Bytes::from(format!("event: message\ndata: {}\n\n", message))
                 );
             }
+            // Mark session as disconnected for cleanup tracking
+            let sessions = state.sessions.clone();
+            sessions.mark_disconnected(&session_id);
             info!("SSE session {} closed", session_id);
         })
 }
@@ -90,6 +93,8 @@ async fn handle_message(
         error!("Session not found: {}", session_id);
         return HttpResponse::NotFound().json(json!({"error": "session not found"}));
     }
+    // Update session activity
+    state.sessions.touch(session_id);
 
     let request_str = serde_json::to_string(&request).unwrap();
 
