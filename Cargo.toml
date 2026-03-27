@@ -34,7 +34,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "mcp-client"
-path = "src/bin/client.rs"
+path = "src/bin/client_stdio.rs"
 
 [dependencies]
 actix-web = "4.13.0"

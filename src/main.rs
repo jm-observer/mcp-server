@@ -154,6 +154,8 @@ fn load_tool_files(dir: &Path, registry: &mut ToolRegistry, default_timeout: u64
     Ok(())
 }
 
+// cargo build --workspace --features prod
+// cargo run --bin mcp-client -- '{"id":6,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"command_name":"git log","workspace":"/home/fengqi/.config/mcp"},"name":"mcp-tool"}}'
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
