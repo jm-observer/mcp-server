@@ -1,5 +1,5 @@
 use crate::config::{RegisteredTool, ToolAction};
-use log::info;
+use log::{info, warn};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -16,6 +16,8 @@ pub enum CommandError {
     TemplateResolution(String),
     #[error("Tool missing command executable")]
     MissingCommand,
+    #[error("Tool missing arg: {0}")]
+    MissingArg(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Command execution timeout")]
@@ -75,13 +77,6 @@ impl CommandExecutor {
         let mut resolved = Vec::new();
 
         for tpl in templates {
-            if tpl.starts_with("${") && tpl.ends_with('}') && tpl.chars().filter(|&c| c == '{').count() == 1 {
-                let var_name = &tpl[2..tpl.len() - 1];
-                if !args.contains_key(var_name) {
-                    // 如果在 args 数组中遇到了独立占据整个元素的 "${optional_var}" 而传入的参数里未填选项时，应当从该 args 数组里剔除这一整项
-                    continue;
-                }
-            }
             let res = Self::resolve_template(tpl, args)?;
             resolved.push(res);
         }
@@ -96,30 +91,40 @@ impl CommandExecutor {
         let mut resolved_args = Vec::new();
 
         if let Some(t_args) = match &tool.def.action {
-            ToolAction::Command { args, .. } => args.as_ref(),
+            ToolAction::Command { subcommands: args, .. } => args.clone(),
             _ => None,
         } {
-            resolved_args = Self::resolve_args(t_args, arguments)?;
+            resolved_args.extend(t_args);
         }
-
         if let Some(params) = &tool.def.parameters {
             for param in params {
-                let Some(arg_templates) = &param.arg else {
-                    continue;
-                };
                 let Some(value) = arguments.get(&param.name) else {
+                    if param.required {
+                        return Err(CommandError::MissingArg(param.name.clone()));
+                    }
                     continue;
                 };
-
                 if param.r#type == "boolean" {
-                    if value.as_bool().unwrap_or(false) {
-                        resolved_args.extend(arg_templates.iter().cloned());
+                    // default to true
+                    if let Some(arg) = param.arg.as_ref().map(|x| x.get(0)).flatten().cloned() {
+                        resolved_args.push(arg);
                     }
                     continue;
                 }
-
-                let resolved = Self::resolve_args(arg_templates, arguments)?;
-                resolved_args.extend(resolved);
+                if let Some(arg_templates) = param.arg.clone() {
+                    resolved_args.extend(arg_templates);
+                };
+                match value {
+                    Value::String(s) => resolved_args.push(s.clone()),
+                    Value::Number(n) => resolved_args.push(n.to_string()),
+                    Value::Bool(b) => resolved_args.push(b.to_string()),
+                    _ => {
+                        return Err(CommandError::TemplateResolution(format!(
+                            "Parameter '{}' has unsupported value type",
+                            param.name
+                        )));
+                    }
+                }
             }
         }
 
@@ -325,7 +330,7 @@ mod tests {
                 description: "Build cargo project".to_string(),
                 action: ToolAction::Command {
                     command: Some("cargo".to_string()),
-                    args: Some(vec!["build".to_string()]),
+                    subcommands: Some(vec!["build".to_string()]),
                 },
                 env: None,
                 timeout_secs: None,
@@ -338,13 +343,13 @@ mod tests {
         }
     }
 
-    fn string_param(name: &str, arg: &[&str]) -> ParameterDef {
+    fn string_param(name: &str, flags: &[&str]) -> ParameterDef {
         ParameterDef {
             name: name.to_string(),
             description: name.to_string(),
             r#type: "string".to_string(),
             required: false,
-            arg: Some(arg.iter().map(|item| (*item).to_string()).collect()),
+            arg: Some(flags.iter().map(|item| (*item).to_string()).collect()),
         }
     }
 
@@ -378,8 +383,8 @@ mod tests {
     #[test]
     fn appends_dynamic_args_in_parameter_declaration_order() {
         let tool = sample_tool(vec![
-            string_param("package", &["-p", "${package}"]),
-            string_param("bin", &["--bin", "${bin}"]),
+            string_param("package", &["-p"]),
+            string_param("bin", &["--bin"]),
         ]);
         let arguments = args_map(&[("bin", json!("demo-bin")), ("package", json!("demo-pkg"))]);
 
@@ -390,7 +395,7 @@ mod tests {
 
     #[test]
     fn skips_optional_flag_value_pair_when_string_arg_missing() {
-        let tool = sample_tool(vec![string_param("bin", &["--bin", "${bin}"])]);
+        let tool = sample_tool(vec![string_param("bin", &["--bin"])]);
         let arguments = args_map(&[]);
 
         let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
@@ -413,7 +418,7 @@ mod tests {
     fn metadata_parameters_do_not_affect_cli_args() {
         let tool = sample_tool(vec![
             metadata_param("project"),
-            string_param("package", &["-p", "${package}"]),
+            string_param("package", &["-p"]),
         ]);
         let arguments = args_map(&[("project", json!("mcp-server")), ("package", json!("demo-pkg"))]);
 
@@ -423,8 +428,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_complex_values_used_in_arg_templates() {
-        let tool = sample_tool(vec![string_param("items", &["--items", "${items}"])]);
+    fn rejects_complex_values_used_in_arg() {
+        let tool = sample_tool(vec![string_param("items", &["--items"])]);
         let arguments = args_map(&[("items", json!(["a", "b"]))]);
 
         let err = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap_err();

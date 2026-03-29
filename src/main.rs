@@ -165,7 +165,7 @@ fn load_tool_files(dir: &Path, registry: &mut ToolRegistry, default_timeout: u64
 async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
 
-    let _ = custom_utils::logger::logger_feature("mcp-server", Debug, Info, false).build();
+    let _ = custom_utils::logger::logger_feature("mcp", Debug, Info, false).build();
 
     if args.schema {
         println!("{}", mcp::config::tool_config_schema());

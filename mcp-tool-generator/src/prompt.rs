@@ -117,6 +117,10 @@ action.args
 
 Optional arguments MUST be represented via parameters[*].arg.
 
+For parameters with `arg`, the `arg` array contains only the CLI flag prefix (e.g., `["--bin"]` or `["-p"]`). The parameter value is automatically appended after the flag at runtime. Do NOT include template variables like `${{name}}` in `arg`.
+
+For boolean parameters, `arg` contains the flag itself (e.g., `["--release"]`), which is added only when the value is true.
+
 Do NOT hardcode optional flags or values into action.args.
 
 Do NOT invent parameters that are not explicitly present in the help text.
@@ -271,7 +275,7 @@ Hope this helps!"#;
                     "description": "Package to build",
                     "type": "string",
                     "required": false,
-                    "arg": ["-p", "${package}"]
+                    "arg": ["-p"]
                 }
             ]
         }"#;
@@ -281,7 +285,7 @@ Hope this helps!"#;
         assert_eq!(params[0].name, "package");
         assert_eq!(
             params[0].arg.as_ref().unwrap(),
-            &vec!["-p".to_string(), "${package}".to_string()]
+            &vec!["-p".to_string()]
         );
     }
 }

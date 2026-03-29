@@ -37,7 +37,7 @@ mod tests {
                 description: format!("{} description", name),
                 action: ToolAction::Command {
                     command: Some("test".to_string()),
-                    args: Some(vec![name.to_string()]),
+                    subcommands: Some(vec![name.to_string()]),
                 },
                 env: None,
                 timeout_secs: None,
@@ -57,7 +57,7 @@ mod tests {
                 description: "Build a cargo project".to_string(),
                 action: ToolAction::Command {
                     command: Some("cargo".to_string()),
-                    args: Some(vec!["build".to_string()]),
+                    subcommands: Some(vec!["build".to_string()]),
                 },
                 env: None,
                 timeout_secs: None,
@@ -67,7 +67,7 @@ mod tests {
                     description: "Package to build".to_string(),
                     r#type: "string".to_string(),
                     required: false,
-                    arg: Some(vec!["-p".to_string(), "${package}".to_string()]),
+                    arg: Some(vec!["-p".to_string()]),
                 }]),
             },
             command: vec!["cargo".to_string(), "build".to_string()],
@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(params[0].name, "package");
         assert_eq!(
             params[0].arg.as_ref().unwrap(),
-            &vec!["-p".to_string(), "${package}".to_string()]
+            &vec!["-p".to_string()]
         );
     }
 

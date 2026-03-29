@@ -39,7 +39,7 @@ pub struct ToolDef {
 pub enum ToolAction {
     Command {
         command: Option<String>,
-        args: Option<Vec<String>>,
+        subcommands: Option<Vec<String>>,
     },
     Http {
         method: Option<String>,
@@ -53,7 +53,7 @@ impl Default for ToolAction {
     fn default() -> Self {
         ToolAction::Command {
             command: None,
-            args: None,
+            subcommands: None,
         }
     }
 }
@@ -165,7 +165,7 @@ impl ToolRegistry {
             description: "Execute an arbitrary shell command".to_string(),
             action: ToolAction::Command {
                 command: None,
-                args: None,
+                subcommands: None,
             },
             env: None,
             timeout_secs: None,
@@ -215,7 +215,7 @@ impl ToolRegistry {
                     .to_string(),
                 action: ToolAction::Command {
                     command: None,
-                    args: None,
+                    subcommands: None,
                 },
                 env: None,
                 timeout_secs: None,
@@ -241,7 +241,7 @@ impl ToolRegistry {
                 description: "Read the content of a file. Path must be an absolute path.".to_string(),
                 action: ToolAction::Command {
                     command: None,
-                    args: None,
+                    subcommands: None,
                 },
                 env: None,
                 timeout_secs: None,
@@ -265,7 +265,7 @@ impl ToolRegistry {
             def: ToolDef {
                 name: "write_file".to_string(),
                 description: "Write content to a file (overwrites if exists, creates if not). Path must be an absolute path. Parent directory must exist.".to_string(),
-                action: ToolAction::Command { command: None, args: None, },
+                action: ToolAction::Command { command: None, subcommands: None, },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
@@ -297,7 +297,7 @@ impl ToolRegistry {
             def: ToolDef {
                 name: "list_allowed_dirs".to_string(),
                 description: "List all configured directories and their usage descriptions. This helps the client discover which directories are available for file operations.".to_string(),
-                action: ToolAction::Command { command: None, args: None, },
+                action: ToolAction::Command { command: None, subcommands: None, },
                 env: None,
                 timeout_secs: None,
                 cwd: false,
