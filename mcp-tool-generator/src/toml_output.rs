@@ -81,10 +81,7 @@ mod tests {
         assert_eq!(parsed.tools.len(), 1);
         let params = parsed.tools[0].parameters.as_ref().unwrap();
         assert_eq!(params[0].name, "package");
-        assert_eq!(
-            params[0].arg.as_ref().unwrap(),
-            &vec!["-p".to_string()]
-        );
+        assert_eq!(params[0].arg.as_ref().unwrap(), &vec!["-p".to_string()]);
     }
 
     #[test]

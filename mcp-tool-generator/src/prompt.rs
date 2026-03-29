@@ -283,9 +283,6 @@ Hope this helps!"#;
         let params = output.tool_def.parameters.unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "package");
-        assert_eq!(
-            params[0].arg.as_ref().unwrap(),
-            &vec!["-p".to_string()]
-        );
+        assert_eq!(params[0].arg.as_ref().unwrap(), &vec!["-p".to_string()]);
     }
 }

@@ -7,6 +7,7 @@ use log::{
 };
 use mcp::config::{PromptFile, PromptRegistry, ServerConfig, ToolFile, ToolRegistry};
 use mcp::protocol::McpHandler;
+
 use mcp::transport::sse::SessionManager;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -105,11 +106,15 @@ async fn handle_message(
                 error!("Failed to send response to session {}: {}", session_id, e);
                 return HttpResponse::Gone().json(json!({"error": "session closed"}));
             }
-            HttpResponse::Accepted().finish()
+            HttpResponse::Accepted()
+                .content_type("application/json")
+                .json(json!({"ok": true}))
         }
         None => {
             info!("Handler produced no response for session {}", session_id);
-            HttpResponse::Accepted().finish()
+            HttpResponse::Accepted()
+                .content_type("application/json")
+                .json(json!({"ok": true}))
         }
     }
 }
@@ -120,7 +125,7 @@ async fn run_sse_server(handler: McpHandler, config: &ServerConfig) -> std::io::
         sessions: Arc::new(SessionManager::new()),
     };
 
-    let bind_addr = (config.server.host.as_str(), config.server.port);
+    let bind_addr = (config.server.host.as_str(), config.server.sse_port);
     info!("Starting SSE server on {}:{}", bind_addr.0, bind_addr.1);
 
     HttpServer::new(move || {
@@ -254,6 +259,13 @@ async fn main() -> std::io::Result<()> {
     if args.stdio {
         mcp::transport::stdio::run_stdio(Arc::new(handler)).await
     } else {
-        run_sse_server(handler, &server_config).await
+        let http_handler = handler.clone();
+        let http_server_config = server_config.clone();
+        // Run both HTTP and SSE servers concurrently
+        let http_fut = mcp::transport::http::run_http(http_handler, &http_server_config);
+        let sse_fut = run_sse_server(handler, &server_config);
+        // Await both futures; propagate any error
+        tokio::try_join!(http_fut, sse_fut)?;
+        Ok(())
     }
 }

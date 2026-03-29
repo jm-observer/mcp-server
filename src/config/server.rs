@@ -17,8 +17,10 @@ pub struct ServerConfig {
 pub struct ServerSection {
     #[serde(default = "default_host")]
     pub host: String,
-    #[serde(default = "default_port")]
-    pub port: u16,
+    #[serde(default = "default_sse_port")]
+    pub sse_port: u16,
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -52,7 +54,8 @@ impl Default for ServerSection {
     fn default() -> Self {
         Self {
             host: default_host(),
-            port: default_port(),
+            sse_port: default_sse_port(),
+            http_port: default_http_port(),
         }
     }
 }
@@ -61,8 +64,12 @@ fn default_host() -> String {
     "127.0.0.1".to_string()
 }
 
-fn default_port() -> u16 {
+fn default_sse_port() -> u16 {
     3000
+}
+
+fn default_http_port() -> u16 {
+    3001
 }
 
 #[derive(Debug, Deserialize, Clone)]

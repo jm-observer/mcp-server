@@ -105,5 +105,4 @@ impl SessionManager {
             entry.sse_connected = false;
         }
     }
-
 }

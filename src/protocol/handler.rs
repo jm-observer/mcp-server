@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct McpHandler {
     registry: Arc<ToolRegistry>,
     server_config: Arc<ServerConfig>,
@@ -13,10 +14,7 @@ pub struct McpHandler {
 }
 
 impl McpHandler {
-    pub fn new(
-        registry: Arc<ToolRegistry>,
-        server_config: Arc<ServerConfig>,
-    ) -> Self {
+    pub fn new(registry: Arc<ToolRegistry>, server_config: Arc<ServerConfig>) -> Self {
         Self {
             registry,
             server_config,
@@ -76,7 +74,9 @@ impl McpHandler {
             }
             "resources/list" => Some(self.handle_resources_list(req.id.clone().unwrap_or(Value::Null))),
             "resources/read" => Some(self.handle_resources_read(req.id.clone().unwrap_or(Value::Null), req.params)),
-            "resources/templates/list" => Some(self.handle_resource_templates_list(req.id.clone().unwrap_or(Value::Null))),
+            "resources/templates/list" => {
+                Some(self.handle_resource_templates_list(req.id.clone().unwrap_or(Value::Null)))
+            }
             "prompts/list" => Some(self.handle_prompts_list(req.id.clone().unwrap_or(Value::Null))),
             "prompts/get" => Some(self.handle_prompts_get(req.id.clone().unwrap_or(Value::Null), req.params)),
             _ => {
@@ -113,13 +113,12 @@ impl McpHandler {
             Some(text)
         };
 
-        let resources_cap = if !self.server_config.resources.is_empty()
-            || !self.server_config.defaults.directories.is_empty()
-        {
-            Some(ResourcesCapability { list_changed: None })
-        } else {
-            None
-        };
+        let resources_cap =
+            if !self.server_config.resources.is_empty() || !self.server_config.defaults.directories.is_empty() {
+                Some(ResourcesCapability { list_changed: None })
+            } else {
+                None
+            };
 
         let prompts_cap = if !self.prompt_registry.is_empty() {
             Some(PromptsCapability { list_changed: None })
@@ -482,9 +481,7 @@ impl McpHandler {
             if path.is_file() {
                 match std::fs::read_to_string(path) {
                     Ok(text) => {
-                        let mime = mime_guess::from_path(path)
-                            .first()
-                            .map(|m| m.to_string());
+                        let mime = mime_guess::from_path(path).first().map(|m| m.to_string());
                         let result = ResourceReadResult {
                             contents: vec![ResourceContent {
                                 uri: uri.clone(),
@@ -505,10 +502,7 @@ impl McpHandler {
                             jsonrpc: "2.0".into(),
                             id: Some(id),
                             result: None,
-                            error: Some(JsonRpcError::internal_error(&format!(
-                                "Failed to read file: {}",
-                                e
-                            ))),
+                            error: Some(JsonRpcError::internal_error(&format!("Failed to read file: {}", e))),
                         };
                     }
                 }
@@ -521,7 +515,7 @@ impl McpHandler {
                             .map(|e| {
                                 let name = e.file_name().to_string_lossy().to_string();
                                 let ft = e.file_type().ok();
-                                let prefix = if ft.as_ref().map_or(false, |t| t.is_dir()) {
+                                let prefix = if ft.as_ref().is_some_and(|t| t.is_dir()) {
                                     "[dir]"
                                 } else {
                                     "[file]"
@@ -561,10 +555,7 @@ impl McpHandler {
                     jsonrpc: "2.0".into(),
                     id: Some(id),
                     result: None,
-                    error: Some(JsonRpcError::invalid_params(&format!(
-                        "Resource not found: {}",
-                        uri
-                    ))),
+                    error: Some(JsonRpcError::invalid_params(&format!("Resource not found: {}", uri))),
                 };
             }
         }

@@ -73,6 +73,7 @@ impl JsonRpcError {
 
 /// initialize 响应
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     pub protocol_version: String,
     pub capabilities: ServerCapabilities,
@@ -95,14 +96,14 @@ pub struct ServerCapabilities {
 pub struct ToolsCapability {}
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourcesCapability {
-    #[serde(rename = "listChanged", skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PromptsCapability {
-    #[serde(rename = "listChanged", skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
 }
 
@@ -114,10 +115,10 @@ pub struct ServerInfo {
 
 /// tools/list 响应
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolInfo {
     pub name: String,
     pub description: String,
-    #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
 
@@ -151,12 +152,12 @@ pub struct ContentBlock {
 
 /// resources/list 响应中的单个资源
 #[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceInfo {
     pub uri: String,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
 }
 
@@ -168,9 +169,9 @@ pub struct ResourcesListResult {
 
 /// resources/read 响应中的资源内容
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceContent {
     pub uri: String,
-    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -192,20 +193,19 @@ pub struct ResourceReadParams {
 
 /// resources/templates/list 响应中的资源模板
 #[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceTemplate {
-    #[serde(rename = "uriTemplate")]
     pub uri_template: String,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
 }
 
 /// resources/templates/list 响应
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceTemplatesListResult {
-    #[serde(rename = "resourceTemplates")]
     pub resource_templates: Vec<ResourceTemplate>,
 }
 

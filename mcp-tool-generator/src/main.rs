@@ -117,7 +117,11 @@ async fn main() -> Result<()> {
     );
 
     // Core generation logic moved to a separate function for reuse
-    let command_name = args.command_name.split_whitespace().next().unwrap_or(&args.command_name);
+    let command_name = args
+        .command_name
+        .split_whitespace()
+        .next()
+        .unwrap_or(&args.command_name);
     let out_dir = workspace.join("tools.d").join(command_name);
     // Ensure the output directory exists
     fs::create_dir_all(&out_dir).await?;

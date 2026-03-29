@@ -1,5 +1,5 @@
 use crate::config::{RegisteredTool, ToolAction};
-use log::{info, warn};
+use log::info;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -104,25 +104,31 @@ impl CommandExecutor {
                     }
                     continue;
                 };
+                #[allow(clippy::collapsible_if)]
                 if param.r#type == "boolean" {
-                    // default to true
-                    if let Some(arg) = param.arg.as_ref().map(|x| x.get(0)).flatten().cloned() {
-                        resolved_args.push(arg);
+                    // Only add flag when boolean value is true
+                    if let Value::Bool(true) = value {
+                        if let Some(arg) = param.arg.as_ref().and_then(|x| x.first()).cloned() {
+                            resolved_args.push(arg);
+                        }
                     }
                     continue;
                 }
                 if let Some(arg_templates) = param.arg.clone() {
                     resolved_args.extend(arg_templates);
                 };
-                match value {
-                    Value::String(s) => resolved_args.push(s.clone()),
-                    Value::Number(n) => resolved_args.push(n.to_string()),
-                    Value::Bool(b) => resolved_args.push(b.to_string()),
-                    _ => {
-                        return Err(CommandError::TemplateResolution(format!(
-                            "Parameter '{}' has unsupported value type",
-                            param.name
-                        )));
+                // Only push the value if the parameter has an associated argument (i.e., it's not metadata-only)
+                if param.arg.is_some() {
+                    match value {
+                        Value::String(s) => resolved_args.push(s.clone()),
+                        Value::Number(n) => resolved_args.push(n.to_string()),
+                        Value::Bool(b) => resolved_args.push(b.to_string()),
+                        _ => {
+                            return Err(CommandError::TemplateResolution(format!(
+                                "Parameter '{}' has unsupported value type",
+                                param.name
+                            )));
+                        }
                     }
                 }
             }
@@ -382,10 +388,7 @@ mod tests {
 
     #[test]
     fn appends_dynamic_args_in_parameter_declaration_order() {
-        let tool = sample_tool(vec![
-            string_param("package", &["-p"]),
-            string_param("bin", &["--bin"]),
-        ]);
+        let tool = sample_tool(vec![string_param("package", &["-p"]), string_param("bin", &["--bin"])]);
         let arguments = args_map(&[("bin", json!("demo-bin")), ("package", json!("demo-pkg"))]);
 
         let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
@@ -416,10 +419,7 @@ mod tests {
 
     #[test]
     fn metadata_parameters_do_not_affect_cli_args() {
-        let tool = sample_tool(vec![
-            metadata_param("project"),
-            string_param("package", &["-p"]),
-        ]);
+        let tool = sample_tool(vec![metadata_param("project"), string_param("package", &["-p"])]);
         let arguments = args_map(&[("project", json!("mcp-server")), ("package", json!("demo-pkg"))]);
 
         let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
