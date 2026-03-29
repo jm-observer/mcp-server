@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::config::{ServerConfig, ToolAction, ToolRegistry};
+use crate::config::{PromptRegistry, ServerConfig, ToolAction, ToolRegistry};
 use log::{error, info};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -9,13 +9,30 @@ use std::sync::Arc;
 pub struct McpHandler {
     registry: Arc<ToolRegistry>,
     server_config: Arc<ServerConfig>,
+    prompt_registry: Arc<PromptRegistry>,
 }
 
 impl McpHandler {
-    pub fn new(registry: Arc<ToolRegistry>, server_config: Arc<ServerConfig>) -> Self {
+    pub fn new(
+        registry: Arc<ToolRegistry>,
+        server_config: Arc<ServerConfig>,
+    ) -> Self {
         Self {
             registry,
             server_config,
+            prompt_registry: Arc::new(PromptRegistry::new()),
+        }
+    }
+
+    pub fn with_prompts(
+        registry: Arc<ToolRegistry>,
+        server_config: Arc<ServerConfig>,
+        prompt_registry: Arc<PromptRegistry>,
+    ) -> Self {
+        Self {
+            registry,
+            server_config,
+            prompt_registry,
         }
     }
 
@@ -57,6 +74,11 @@ impl McpHandler {
                     Some(self.handle_tools_call(req.id.clone().unwrap(), req.params).await)
                 }
             }
+            "resources/list" => Some(self.handle_resources_list(req.id.clone().unwrap_or(Value::Null))),
+            "resources/read" => Some(self.handle_resources_read(req.id.clone().unwrap_or(Value::Null), req.params)),
+            "resources/templates/list" => Some(self.handle_resource_templates_list(req.id.clone().unwrap_or(Value::Null))),
+            "prompts/list" => Some(self.handle_prompts_list(req.id.clone().unwrap_or(Value::Null))),
+            "prompts/get" => Some(self.handle_prompts_get(req.id.clone().unwrap_or(Value::Null), req.params)),
             _ => {
                 if is_notification {
                     None
@@ -91,10 +113,26 @@ impl McpHandler {
             Some(text)
         };
 
+        let resources_cap = if !self.server_config.resources.is_empty()
+            || !self.server_config.defaults.directories.is_empty()
+        {
+            Some(ResourcesCapability { list_changed: None })
+        } else {
+            None
+        };
+
+        let prompts_cap = if !self.prompt_registry.is_empty() {
+            Some(PromptsCapability { list_changed: None })
+        } else {
+            None
+        };
+
         let result = InitializeResult {
             protocol_version: "2025-03-26".into(),
             capabilities: ServerCapabilities {
                 tools: Some(ToolsCapability {}),
+                resources: resources_cap,
+                prompts: prompts_cap,
             },
             server_info: ServerInfo {
                 name: "mcp-server".into(),
@@ -371,6 +409,306 @@ impl McpHandler {
                 result: Some(serde_json::to_value(call_result).unwrap()),
                 error: None,
             }
+        }
+    }
+
+    // ===== Resources Handlers =====
+
+    fn handle_resources_list(&self, id: Value) -> JsonRpcResponse {
+        let mut resources = Vec::new();
+
+        // 从 config.resources 加载显式配置的资源
+        for res in &self.server_config.resources {
+            resources.push(ResourceInfo {
+                uri: res.uri.clone(),
+                name: res.name.clone(),
+                description: res.description.clone(),
+                mime_type: res.mime_type.clone(),
+            });
+        }
+
+        // 从 directories 生成目录资源
+        for dir in &self.server_config.defaults.directories {
+            let uri = format!("file://{}", dir.path.to_string_lossy());
+            resources.push(ResourceInfo {
+                uri,
+                name: dir
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| dir.path.to_string_lossy().to_string()),
+                description: Some(dir.description.clone()),
+                mime_type: None,
+            });
+        }
+
+        let result = ResourcesListResult { resources };
+        JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(id),
+            result: Some(serde_json::to_value(result).unwrap()),
+            error: None,
+        }
+    }
+
+    fn handle_resources_read(&self, id: Value, params: Option<Value>) -> JsonRpcResponse {
+        let read_params: ResourceReadParams = match params {
+            Some(p) => match serde_json::from_value(p) {
+                Ok(p) => p,
+                Err(e) => {
+                    return JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: None,
+                        error: Some(JsonRpcError::invalid_params(&e.to_string())),
+                    };
+                }
+            },
+            None => {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: None,
+                    error: Some(JsonRpcError::invalid_params("missing params")),
+                };
+            }
+        };
+
+        let uri = &read_params.uri;
+
+        // 支持 file:// 协议
+        if let Some(file_path) = uri.strip_prefix("file://") {
+            let path = Path::new(file_path);
+            if path.is_file() {
+                match std::fs::read_to_string(path) {
+                    Ok(text) => {
+                        let mime = mime_guess::from_path(path)
+                            .first()
+                            .map(|m| m.to_string());
+                        let result = ResourceReadResult {
+                            contents: vec![ResourceContent {
+                                uri: uri.clone(),
+                                mime_type: mime,
+                                text: Some(text),
+                                blob: None,
+                            }],
+                        };
+                        return JsonRpcResponse {
+                            jsonrpc: "2.0".into(),
+                            id: Some(id),
+                            result: Some(serde_json::to_value(result).unwrap()),
+                            error: None,
+                        };
+                    }
+                    Err(e) => {
+                        return JsonRpcResponse {
+                            jsonrpc: "2.0".into(),
+                            id: Some(id),
+                            result: None,
+                            error: Some(JsonRpcError::internal_error(&format!(
+                                "Failed to read file: {}",
+                                e
+                            ))),
+                        };
+                    }
+                }
+            } else if path.is_dir() {
+                // 对目录返回文件列表
+                match std::fs::read_dir(path) {
+                    Ok(entries) => {
+                        let listing: Vec<String> = entries
+                            .filter_map(|e| e.ok())
+                            .map(|e| {
+                                let name = e.file_name().to_string_lossy().to_string();
+                                let ft = e.file_type().ok();
+                                let prefix = if ft.as_ref().map_or(false, |t| t.is_dir()) {
+                                    "[dir]"
+                                } else {
+                                    "[file]"
+                                };
+                                format!("{} {}", prefix, name)
+                            })
+                            .collect();
+                        let result = ResourceReadResult {
+                            contents: vec![ResourceContent {
+                                uri: uri.clone(),
+                                mime_type: Some("text/plain".into()),
+                                text: Some(listing.join("\n")),
+                                blob: None,
+                            }],
+                        };
+                        return JsonRpcResponse {
+                            jsonrpc: "2.0".into(),
+                            id: Some(id),
+                            result: Some(serde_json::to_value(result).unwrap()),
+                            error: None,
+                        };
+                    }
+                    Err(e) => {
+                        return JsonRpcResponse {
+                            jsonrpc: "2.0".into(),
+                            id: Some(id),
+                            result: None,
+                            error: Some(JsonRpcError::internal_error(&format!(
+                                "Failed to read directory: {}",
+                                e
+                            ))),
+                        };
+                    }
+                }
+            } else {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: None,
+                    error: Some(JsonRpcError::invalid_params(&format!(
+                        "Resource not found: {}",
+                        uri
+                    ))),
+                };
+            }
+        }
+
+        JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(id),
+            result: None,
+            error: Some(JsonRpcError::invalid_params(&format!(
+                "Unsupported URI scheme: {}",
+                uri
+            ))),
+        }
+    }
+
+    fn handle_resource_templates_list(&self, id: Value) -> JsonRpcResponse {
+        let mut templates = Vec::new();
+
+        // 为每个 directory 生成一个 URI 模板
+        for dir in &self.server_config.defaults.directories {
+            templates.push(ResourceTemplate {
+                uri_template: format!("file://{}{{/path}}", dir.path.to_string_lossy()),
+                name: format!(
+                    "Files in {}",
+                    dir.path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| dir.path.to_string_lossy().to_string())
+                ),
+                description: Some(dir.description.clone()),
+                mime_type: None,
+            });
+        }
+
+        let result = ResourceTemplatesListResult {
+            resource_templates: templates,
+        };
+        JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(id),
+            result: Some(serde_json::to_value(result).unwrap()),
+            error: None,
+        }
+    }
+
+    // ===== Prompts Handlers =====
+
+    fn handle_prompts_list(&self, id: Value) -> JsonRpcResponse {
+        let prompts: Vec<PromptInfo> = self
+            .prompt_registry
+            .list()
+            .map(|p| PromptInfo {
+                name: p.name.clone(),
+                description: p.description.clone(),
+                arguments: p.arguments.as_ref().map(|args| {
+                    args.iter()
+                        .map(|a| PromptArgument {
+                            name: a.name.clone(),
+                            description: a.description.clone(),
+                            required: a.required,
+                        })
+                        .collect()
+                }),
+            })
+            .collect();
+
+        let result = PromptsListResult { prompts };
+        JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(id),
+            result: Some(serde_json::to_value(result).unwrap()),
+            error: None,
+        }
+    }
+
+    fn handle_prompts_get(&self, id: Value, params: Option<Value>) -> JsonRpcResponse {
+        let get_params: PromptGetParams = match params {
+            Some(p) => match serde_json::from_value(p) {
+                Ok(p) => p,
+                Err(e) => {
+                    return JsonRpcResponse {
+                        jsonrpc: "2.0".into(),
+                        id: Some(id),
+                        result: None,
+                        error: Some(JsonRpcError::invalid_params(&e.to_string())),
+                    };
+                }
+            },
+            None => {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: None,
+                    error: Some(JsonRpcError::invalid_params("missing params")),
+                };
+            }
+        };
+
+        let prompt_def = match self.prompt_registry.get(&get_params.name) {
+            Some(p) => p,
+            None => {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: None,
+                    error: Some(JsonRpcError::invalid_params(&format!(
+                        "Prompt not found: {}",
+                        get_params.name
+                    ))),
+                };
+            }
+        };
+
+        let arguments = get_params.arguments.unwrap_or_default();
+
+        // 对消息模板进行 ${variable} 替换
+        let messages: Vec<PromptMessage> = prompt_def
+            .messages
+            .iter()
+            .map(|msg| {
+                let mut content = msg.content.clone();
+                for (key, value) in &arguments {
+                    content = content.replace(&format!("${{{}}}", key), value);
+                }
+                PromptMessage {
+                    role: msg.role.clone(),
+                    content: PromptContent {
+                        r#type: "text".into(),
+                        text: content,
+                    },
+                }
+            })
+            .collect();
+
+        let result = PromptGetResult {
+            description: prompt_def.description.clone(),
+            messages,
+        };
+
+        JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: Some(id),
+            result: Some(serde_json::to_value(result).unwrap()),
+            error: None,
         }
     }
 

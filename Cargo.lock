@@ -1680,6 +1680,7 @@ dependencies = [
  "flexi_logger 0.31.8",
  "futures",
  "log",
+ "mime_guess",
  "path-clean",
  "reqwest 0.13.2",
  "schemars",

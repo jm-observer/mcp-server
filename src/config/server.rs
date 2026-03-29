@@ -9,6 +9,8 @@ pub struct ServerConfig {
     pub defaults: DefaultsSection,
     #[serde(default)]
     pub security: SecuritySection,
+    #[serde(default)]
+    pub resources: Vec<ResourceConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -26,8 +28,24 @@ impl Default for ServerConfig {
             server: Default::default(),
             defaults: Default::default(),
             security: Default::default(),
+            resources: vec![],
         }
     }
+}
+
+/// 资源配置：支持单文件和目录两种模式
+#[derive(Debug, Deserialize, Clone)]
+pub struct ResourceConfig {
+    /// 资源 URI (例如 "file:///path/to/file.txt")
+    pub uri: String,
+    /// 资源名称
+    pub name: String,
+    /// 资源描述
+    #[serde(default)]
+    pub description: Option<String>,
+    /// MIME 类型
+    #[serde(default)]
+    pub mime_type: Option<String>,
 }
 
 impl Default for ServerSection {

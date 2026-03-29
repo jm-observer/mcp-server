@@ -83,11 +83,28 @@ pub struct InitializeResult {
 
 #[derive(Debug, Serialize)]
 pub struct ServerCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<ToolsCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ResourcesCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<PromptsCapability>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ToolsCapability {}
+
+#[derive(Debug, Serialize)]
+pub struct ResourcesCapability {
+    #[serde(rename = "listChanged", skip_serializing_if = "Option::is_none")]
+    pub list_changed: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromptsCapability {
+    #[serde(rename = "listChanged", skip_serializing_if = "Option::is_none")]
+    pub list_changed: Option<bool>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
@@ -128,4 +145,124 @@ pub struct ToolCallResult {
 pub struct ContentBlock {
     pub r#type: String,
     pub text: String,
+}
+
+// ===== Resources =====
+
+/// resources/list 响应中的单个资源
+#[derive(Debug, Serialize, Clone)]
+pub struct ResourceInfo {
+    pub uri: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+/// resources/list 响应
+#[derive(Debug, Serialize)]
+pub struct ResourcesListResult {
+    pub resources: Vec<ResourceInfo>,
+}
+
+/// resources/read 响应中的资源内容
+#[derive(Debug, Serialize)]
+pub struct ResourceContent {
+    pub uri: String,
+    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
+}
+
+/// resources/read 响应
+#[derive(Debug, Serialize)]
+pub struct ResourceReadResult {
+    pub contents: Vec<ResourceContent>,
+}
+
+/// resources/read 请求参数
+#[derive(Debug, Deserialize)]
+pub struct ResourceReadParams {
+    pub uri: String,
+}
+
+/// resources/templates/list 响应中的资源模板
+#[derive(Debug, Serialize, Clone)]
+pub struct ResourceTemplate {
+    #[serde(rename = "uriTemplate")]
+    pub uri_template: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(rename = "mimeType", skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+}
+
+/// resources/templates/list 响应
+#[derive(Debug, Serialize)]
+pub struct ResourceTemplatesListResult {
+    #[serde(rename = "resourceTemplates")]
+    pub resource_templates: Vec<ResourceTemplate>,
+}
+
+// ===== Prompts =====
+
+/// prompts/list 响应中的单个 prompt
+#[derive(Debug, Serialize, Clone)]
+pub struct PromptInfo {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<Vec<PromptArgument>>,
+}
+
+/// prompt 参数定义
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptArgument {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// prompts/list 响应
+#[derive(Debug, Serialize)]
+pub struct PromptsListResult {
+    pub prompts: Vec<PromptInfo>,
+}
+
+/// prompts/get 请求参数
+#[derive(Debug, Deserialize)]
+pub struct PromptGetParams {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: Option<HashMap<String, String>>,
+}
+
+/// prompts/get 响应中的消息
+#[derive(Debug, Serialize)]
+pub struct PromptMessage {
+    pub role: String,
+    pub content: PromptContent,
+}
+
+/// prompt 消息内容
+#[derive(Debug, Serialize)]
+pub struct PromptContent {
+    pub r#type: String,
+    pub text: String,
+}
+
+/// prompts/get 响应
+#[derive(Debug, Serialize)]
+pub struct PromptGetResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub messages: Vec<PromptMessage>,
 }

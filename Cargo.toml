@@ -60,6 +60,7 @@ urlencoding = "2.1.3"
 uuid = { version = "1.22.0", features = ["v4"] }
 custom-utils = "0.10.21"
 log = "0.4.29"
+mime_guess = "2"
 flexi_logger = "0.31.8"
 
 [features]

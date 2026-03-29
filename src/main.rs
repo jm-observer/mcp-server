@@ -5,7 +5,7 @@ use log::{
     LevelFilter::{Debug, Info},
     error, info,
 };
-use mcp::config::{ServerConfig, ToolFile, ToolRegistry};
+use mcp::config::{PromptFile, PromptRegistry, ServerConfig, ToolFile, ToolRegistry};
 use mcp::protocol::McpHandler;
 use mcp::transport::sse::SessionManager;
 use serde::Deserialize;
@@ -159,6 +159,31 @@ fn load_tool_files(dir: &Path, registry: &mut ToolRegistry, default_timeout: u64
     Ok(())
 }
 
+/// 递归加载目录下所有 .toml prompt 文件
+fn load_prompt_files(dir: &Path, registry: &mut PromptRegistry) -> std::io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            load_prompt_files(&path, registry)?;
+        } else if path.extension().unwrap_or_default() == "toml" {
+            info!("Loading prompt file: {:?}", path);
+            let content = fs::read_to_string(&path)?;
+            match toml::from_str::<PromptFile>(&content) {
+                Ok(prompt_file) => {
+                    if let Err(e) = registry.register(prompt_file) {
+                        error!("Failed to register prompts from {:?}: {}", path, e);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse prompt file {:?}: {}", path, e);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 // cargo build --workspace --features prod
 // cargo run --bin mcp-client -- '{"id":6,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"command_name":"git log","workspace":"/home/fengqi/.config/mcp"},"name":"mcp-tool"}}'
 #[actix_web::main]
@@ -210,7 +235,21 @@ async fn main() -> std::io::Result<()> {
         info!("tools.d directory not found or is not a directory");
     }
 
-    let handler = McpHandler::new(Arc::new(registry), Arc::new(server_config.clone()));
+    // 加载 prompts.d 目录
+    let mut prompt_registry = PromptRegistry::new();
+    let prompts_dir = workspace_path.join("prompts.d");
+    if prompts_dir.exists() && prompts_dir.is_dir() {
+        load_prompt_files(&prompts_dir, &mut prompt_registry)?;
+        info!("Prompts loaded from prompts.d");
+    } else {
+        info!("prompts.d directory not found or is not a directory");
+    }
+
+    let handler = McpHandler::with_prompts(
+        Arc::new(registry),
+        Arc::new(server_config.clone()),
+        Arc::new(prompt_registry),
+    );
 
     if args.stdio {
         mcp::transport::stdio::run_stdio(Arc::new(handler)).await
