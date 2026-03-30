@@ -3,28 +3,26 @@
 //! and prints the server's response.
 
 use anyhow::Context;
-use log::error;
+use log::{debug, error};
 use reqwest::Client;
 use serde_json::Value;
+use std::env::args;
 use std::time::Duration;
-use tokio::io::{self, AsyncReadExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize logger – keep consistent with other binary tools
     custom_utils::logger::logger_stdout_debug();
-
-    // Read complete stdin (blocking until EOF)
-    let mut stdin_buf = String::new();
-    io::stdin()
-        .read_to_string(&mut stdin_buf)
-        .await
-        .context("failed to read stdin")?;
+    let mut args = args();
+    args.next();
+    let default_payload = r#"{"id":3,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"command_name":"cargo build"},"name":"mcp-tool"}}"#;
+    let stdin_buf = args.next().unwrap_or(default_payload.to_string());
+    debug!("{}", stdin_buf);
 
     // Trim whitespace and ensure we got something
     let json_str = stdin_buf.trim();
     if json_str.is_empty() {
-        eprintln!("[client_http] No input JSON provided on stdin.");
+        error!("[client_http] No input JSON provided on stdin.");
         return Ok(());
     }
 
@@ -32,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     let payload: Value = serde_json::from_str(json_str).context("provided stdin is not valid JSON")?;
 
     // Default MCP server address – can be overridden by env var if needed later
-    let url = std::env::var("MCP_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let url = std::env::var("MCP_URL").unwrap_or_else(|_| "http://192.168.0.68:3001/rpc".to_string());
 
     // Build the HTTP client (use rustls, 300 s timeout – same as other examples)
     let client = Client::builder()
@@ -52,12 +50,12 @@ async fn main() -> anyhow::Result<()> {
     // Handle response
     if response.status().is_success() {
         let body = response.text().await.context("failed to read response body")?;
-        println!("{}", body);
+        debug!("{}", body);
     } else {
         error!("server returned error status {}", response.status());
         // Print any error body for debugging purposes
         let err_body = response.text().await.unwrap_or_default();
-        eprintln!("Error body: {}", err_body);
+        error!("Error body: {}", err_body);
     }
 
     Ok(())

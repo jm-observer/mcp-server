@@ -3,6 +3,7 @@ use log::info;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+
 use std::process::Stdio;
 use std::time::Duration;
 use thiserror::Error;
@@ -110,10 +111,10 @@ impl CommandExecutor {
                 };
                 // Boolean flag handling
                 if param.r#type == "boolean" {
-                    if let Value::Bool(true) = value {
-                        if let Some(arg) = param.arg.as_ref().and_then(|x| x.first()).cloned() {
-                            resolved_args.push(arg);
-                        }
+                    if let Value::Bool(true) = value
+                        && let Some(arg) = param.arg.as_ref().and_then(|x| x.first()).cloned()
+                    {
+                        resolved_args.push(arg);
                     }
                     continue;
                 }
@@ -175,9 +176,12 @@ impl CommandExecutor {
         info!("{cmd_exec} {resolved_args:?}");
 
         let mut child_cmd = Command::new(cmd_exec);
+        // Inherit the current process environment variables, then apply tool-specific ones
+        for (key, value) in std::env::vars() {
+            child_cmd.env(key, value);
+        }
         child_cmd
             .args(resolved_args)
-            .envs(&tool.env)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
