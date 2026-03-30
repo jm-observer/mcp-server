@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"          # ← 这里统一设置你想要的版本
+version = "0.2.1"          # ← 这里统一设置你想要的版本
 edition = "2024"           # 推荐也一起继承
 license = "MIT"
 #license-file = "LICENSE"

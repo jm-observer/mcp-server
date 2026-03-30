@@ -90,6 +90,7 @@ impl CommandExecutor {
     ) -> Result<Vec<String>, CommandError> {
         let mut resolved_args = Vec::new();
 
+        // Add subcommands first
         if let Some(t_args) = match &tool.def.action {
             ToolAction::Command { subcommands: args, .. } => args.clone(),
             _ => None,
@@ -98,15 +99,17 @@ impl CommandExecutor {
         }
         if let Some(params) = &tool.def.parameters {
             for param in params {
+                if param.arg.is_none() && param.required {
+                    continue;
+                }
                 let Some(value) = arguments.get(&param.name) else {
                     if param.required {
                         return Err(CommandError::MissingArg(param.name.clone()));
                     }
                     continue;
                 };
-                #[allow(clippy::collapsible_if)]
+                // Boolean flag handling
                 if param.r#type == "boolean" {
-                    // Only add flag when boolean value is true
                     if let Value::Bool(true) = value {
                         if let Some(arg) = param.arg.as_ref().and_then(|x| x.first()).cloned() {
                             resolved_args.push(arg);
@@ -114,11 +117,29 @@ impl CommandExecutor {
                     }
                     continue;
                 }
-                if let Some(arg_templates) = param.arg.clone() {
-                    resolved_args.extend(arg_templates);
-                };
-                // Only push the value if the parameter has an associated argument (i.e., it's not metadata-only)
-                if param.arg.is_some() {
+                // For non‑boolean, push the first flag then the value
+                if let Some(first) = param.arg.as_ref().and_then(|v| v.first()) {
+                    resolved_args.push(first.clone());
+                }
+                match value {
+                    Value::String(s) => resolved_args.push(s.clone()),
+                    Value::Number(n) => resolved_args.push(n.to_string()),
+                    Value::Bool(b) => resolved_args.push(b.to_string()),
+                    _ => {
+                        return Err(CommandError::TemplateResolution(format!(
+                            "Parameter '{}' has unsupported value type",
+                            param.name
+                        )));
+                    }
+                }
+            }
+
+            // Finally handle required positional parameters (no arg, required)
+            for param in params {
+                if param.arg.is_none() && param.required {
+                    let Some(value) = arguments.get(&param.name) else {
+                        return Err(CommandError::MissingArg(param.name.clone()));
+                    };
                     match value {
                         Value::String(s) => resolved_args.push(s.clone()),
                         Value::Number(n) => resolved_args.push(n.to_string()),
@@ -147,9 +168,8 @@ impl CommandExecutor {
             _ => return Err(CommandError::MissingCommand),
         };
 
-        let t_cmd = cmd_opt.as_ref().ok_or(CommandError::MissingCommand)?;
+        let cmd_exec = cmd_opt.clone().ok_or(CommandError::MissingCommand)?;
 
-        let cmd_exec = Self::resolve_template(t_cmd, arguments)?;
         let resolved_args = Self::resolve_parameter_args(tool, arguments)?;
 
         info!("{cmd_exec} {resolved_args:?}");
@@ -424,19 +444,49 @@ mod tests {
 
         let resolved = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap();
 
-        assert_eq!(resolved, vec!["build", "-p", "demo-pkg"]);
+        assert_eq!(resolved, vec!["build", "mcp-server", "-p", "demo-pkg"]);
     }
 
     #[test]
     fn rejects_complex_values_used_in_arg() {
         let tool = sample_tool(vec![string_param("items", &["--items"])]);
         let arguments = args_map(&[("items", json!(["a", "b"]))]);
-
         let err = CommandExecutor::resolve_parameter_args(&tool, &arguments).unwrap_err();
-
         assert!(matches!(
             err,
             crate::executor::command::CommandError::TemplateResolution(_)
         ));
+    }
+
+    #[test]
+    fn resolves_params_from_mcp_tool_toml() {
+        // Load the TOML definition from the repository resources
+        let toml_str = include_str!("../../res/mcp-tool.toml");
+        let tool_file: crate::config::ToolFile = toml::from_str(toml_str).expect("parse TOML");
+        let mut registry = crate::config::ToolRegistry::new();
+        registry.register(tool_file, 60).expect("register tool");
+        let tool = registry.get("mcp-tool").expect("tool exists");
+
+        // Build arguments map from a JSON object
+        let args_json = json!({
+            "command_name": "git log",
+            "workspace": "/tmp",
+            "vllm_url": "http://example.com",
+            "model": "gpt-4",
+            "help": true,
+            "version": false
+        });
+        let mut args = std::collections::HashMap::new();
+        if let serde_json::Value::Object(map) = args_json {
+            for (k, v) in map {
+                args.insert(k, v);
+            }
+        }
+
+        let resolved = CommandExecutor::resolve_parameter_args(tool, &args).unwrap();
+        assert_eq!(
+            resolved,
+            vec!["-w", "/tmp", "-u", "http://example.com", "-m", "gpt-4", "-h", "git log"]
+        );
     }
 }
