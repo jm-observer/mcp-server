@@ -15,7 +15,8 @@ async fn main() -> anyhow::Result<()> {
     custom_utils::logger::logger_stdout_debug();
     let mut args = args();
     args.next();
-    let default_payload = r#"{"id":3,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"command_name":"cargo build"},"name":"mcp-tool"}}"#;
+    let default_payload = r#"{"id":4,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"days":1,"url":"https://github.com/loongclaw-ai/loongclaw"},"name":"github-commit-info"}}"#;
+    // let default_payload = r#"{"id":3,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"command_name":"cargo build"},"name":"mcp-tool"}}"#;
     let stdin_buf = args.next().unwrap_or(default_payload.to_string());
     debug!("{}", stdin_buf);
 
