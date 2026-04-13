@@ -1,0 +1,7 @@
+[tasks.build]
+command = "cargo"
+args = ["build", "--workspace", "--release", "--features", "prod"]
+
+[tasks.default]
+description = "Default task runs build"
+dependencies = ["build"]
