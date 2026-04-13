@@ -1,10 +1,7 @@
 use actix_web::{App, HttpResponse, HttpServer, Responder, web};
 use bytes::Bytes;
 use clap::Parser;
-use log::{
-    LevelFilter::{Debug, Info},
-    error, info,
-};
+use log::{LevelFilter::Debug, error, info};
 use mcp::config::{PromptFile, PromptRegistry, ServerConfig, ToolFile, ToolRegistry};
 use mcp::protocol::McpHandler;
 
@@ -195,7 +192,7 @@ fn load_prompt_files(dir: &Path, registry: &mut PromptRegistry) -> std::io::Resu
 async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
 
-    let _ = custom_utils::logger::logger_feature("mcp", Debug, Info, false).build();
+    let _ = custom_utils::logger::logger_feature("mcp", Debug, Debug, false).build();
 
     if args.schema {
         println!("{}", mcp::config::tool_config_schema());
