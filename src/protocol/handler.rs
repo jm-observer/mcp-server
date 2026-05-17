@@ -1,9 +1,10 @@
 use super::types::*;
 use crate::config::{PromptRegistry, ServerConfig, ToolAction, ToolRegistry};
 use log::{error, info};
+use path_clean::PathClean;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -44,7 +45,7 @@ impl McpHandler {
                     result: None,
                     error: Some(JsonRpcError::parse_error()),
                 };
-                return Some(serde_json::to_string(&err_res).unwrap());
+                return serde_json::to_string(&err_res).ok();
             }
         };
 
@@ -55,7 +56,7 @@ impl McpHandler {
                 result: None,
                 error: Some(JsonRpcError::invalid_request()),
             };
-            return Some(serde_json::to_string(&err_res).unwrap());
+            return serde_json::to_string(&err_res).ok();
         }
         info!("Processing request: {}", req.method);
         let is_notification = req.id.is_none();
@@ -96,7 +97,7 @@ impl McpHandler {
         if is_notification {
             None
         } else {
-            response.map(|r| serde_json::to_string(&r).unwrap())
+            response.and_then(|r| serde_json::to_string(&r).ok())
         }
     }
 
@@ -140,12 +141,7 @@ impl McpHandler {
             instructions,
         };
 
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(result).unwrap()),
-            error: None,
-        }
+        self.ok_response(id, &result)
     }
 
     fn handle_ping(&self, id: Value) -> JsonRpcResponse {
@@ -192,13 +188,7 @@ impl McpHandler {
         }
 
         let result = ToolsListResult { tools };
-
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(result).unwrap()),
-            error: None,
-        }
+        self.ok_response(id, &result)
     }
 
     async fn handle_tools_call(&self, id: Value, params: Option<Value>) -> JsonRpcResponse {
@@ -316,45 +306,16 @@ impl McpHandler {
                             text: "(Empty Output)".into(),
                         });
                     }
-                    let call_result = ToolCallResult {
-                        content,
-                        is_error: if res.exit_code != 0 { Some(true) } else { None },
-                    };
-                    JsonRpcResponse {
-                        jsonrpc: "2.0".into(),
-                        id: Some(id),
-                        result: Some(serde_json::to_value(call_result).unwrap()),
-                        error: None,
-                    }
+                    let is_error = if res.exit_code != 0 { Some(true) } else { None };
+                    Self::make_tool_result(id, content, is_error)
                 }
                 Err(e) => Self::make_tool_error(id, format!("Execution Error: {}", e)),
             }
         } else if matches!(tool.def.action, ToolAction::Command { .. }) {
             let executor = CommandExecutor;
             match executor.execute(tool, &provided_args).await {
-                Ok(res) => JsonRpcResponse {
-                    jsonrpc: "2.0".into(),
-                    id: Some(id),
-                    result: Some(serde_json::to_value(&res).unwrap()),
-                    error: None,
-                },
-                Err(e) => {
-                    // Convert execution error to ToolCallResult error message
-                    let call_result = ToolCallResult {
-                        content: vec![ContentBlock {
-                            r#type: "text".into(),
-                            text: format!("Execution Error: {}", e),
-                        }],
-                        is_error: Some(true),
-                    };
-
-                    JsonRpcResponse {
-                        jsonrpc: "2.0".into(),
-                        id: Some(id),
-                        result: Some(serde_json::to_value(call_result).unwrap()),
-                        error: None,
-                    }
-                }
+                Ok(res) => self.ok_response(id, &res),
+                Err(e) => Self::make_tool_error(id, format!("Execution Error: {}", e)),
             }
         } else if matches!(tool.def.action, ToolAction::Http { .. }) {
             let executor = HttpExecutor::new();
@@ -364,50 +325,13 @@ impl McpHandler {
                         r#type: "text".into(),
                         text: res.body,
                     }];
-
                     let is_error = if res.status >= 400 { Some(true) } else { None };
-
-                    let call_result = ToolCallResult { content, is_error };
-
-                    JsonRpcResponse {
-                        jsonrpc: "2.0".into(),
-                        id: Some(id),
-                        result: Some(serde_json::to_value(call_result).unwrap()),
-                        error: None,
-                    }
+                    Self::make_tool_result(id, content, is_error)
                 }
-                Err(e) => {
-                    let call_result = ToolCallResult {
-                        content: vec![ContentBlock {
-                            r#type: "text".into(),
-                            text: format!("Executor Error: {}", e),
-                        }],
-                        is_error: Some(true),
-                    };
-
-                    JsonRpcResponse {
-                        jsonrpc: "2.0".into(),
-                        id: Some(id),
-                        result: Some(serde_json::to_value(call_result).unwrap()),
-                        error: None,
-                    }
-                }
+                Err(e) => Self::make_tool_error(id, format!("Executor Error: {}", e)),
             }
         } else {
-            let call_result = ToolCallResult {
-                content: vec![ContentBlock {
-                    r#type: "text".into(),
-                    text: "Not implemented or unknown tool type".into(),
-                }],
-                is_error: Some(true),
-            };
-
-            JsonRpcResponse {
-                jsonrpc: "2.0".into(),
-                id: Some(id),
-                result: Some(serde_json::to_value(call_result).unwrap()),
-                error: None,
-            }
+            Self::make_tool_error(id, "Not implemented or unknown tool type".into())
         }
     }
 
@@ -442,12 +366,19 @@ impl McpHandler {
         }
 
         let result = ResourcesListResult { resources };
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(result).unwrap()),
-            error: None,
+        self.ok_response(id, &result)
+    }
+
+    fn is_path_allowed(&self, path: &Path) -> bool {
+        let dirs = &self.server_config.defaults.directories;
+        if dirs.is_empty() {
+            return true;
         }
+        let cleaned = PathBuf::from(path).clean();
+        dirs.iter().any(|d| {
+            let allowed = d.path.clean();
+            cleaned.starts_with(&allowed)
+        })
     }
 
     fn handle_resources_read(&self, id: Value, params: Option<Value>) -> JsonRpcResponse {
@@ -478,6 +409,19 @@ impl McpHandler {
         // 支持 file:// 协议
         if let Some(file_path) = uri.strip_prefix("file://") {
             let path = Path::new(file_path);
+
+            if !self.is_path_allowed(path) {
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".into(),
+                    id: Some(id),
+                    result: None,
+                    error: Some(JsonRpcError::invalid_params(&format!(
+                        "Access denied: path is outside allowed directories: {}",
+                        file_path
+                    ))),
+                };
+            }
+
             if path.is_file() {
                 match std::fs::read_to_string(path) {
                     Ok(text) => {
@@ -490,12 +434,7 @@ impl McpHandler {
                                 blob: None,
                             }],
                         };
-                        return JsonRpcResponse {
-                            jsonrpc: "2.0".into(),
-                            id: Some(id),
-                            result: Some(serde_json::to_value(result).unwrap()),
-                            error: None,
-                        };
+                        return self.ok_response(id, &result);
                     }
                     Err(e) => {
                         return JsonRpcResponse {
@@ -507,7 +446,6 @@ impl McpHandler {
                     }
                 }
             } else if path.is_dir() {
-                // 对目录返回文件列表
                 match std::fs::read_dir(path) {
                     Ok(entries) => {
                         let listing: Vec<String> = entries
@@ -531,12 +469,7 @@ impl McpHandler {
                                 blob: None,
                             }],
                         };
-                        return JsonRpcResponse {
-                            jsonrpc: "2.0".into(),
-                            id: Some(id),
-                            result: Some(serde_json::to_value(result).unwrap()),
-                            error: None,
-                        };
+                        return self.ok_response(id, &result);
                     }
                     Err(e) => {
                         return JsonRpcResponse {
@@ -593,12 +526,7 @@ impl McpHandler {
         let result = ResourceTemplatesListResult {
             resource_templates: templates,
         };
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(result).unwrap()),
-            error: None,
-        }
+        self.ok_response(id, &result)
     }
 
     // ===== Prompts Handlers =====
@@ -623,12 +551,7 @@ impl McpHandler {
             .collect();
 
         let result = PromptsListResult { prompts };
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(result).unwrap()),
-            error: None,
-        }
+        self.ok_response(id, &result)
     }
 
     fn handle_prompts_get(&self, id: Value, params: Option<Value>) -> JsonRpcResponse {
@@ -694,22 +617,41 @@ impl McpHandler {
             description: prompt_def.description.clone(),
             messages,
         };
+        self.ok_response(id, &result)
+    }
 
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(result).unwrap()),
-            error: None,
+    fn ok_response(&self, id: Value, result: &impl serde::Serialize) -> JsonRpcResponse {
+        match serde_json::to_value(result) {
+            Ok(v) => JsonRpcResponse {
+                jsonrpc: "2.0".into(),
+                id: Some(id),
+                result: Some(v),
+                error: None,
+            },
+            Err(e) => JsonRpcResponse {
+                jsonrpc: "2.0".into(),
+                id: Some(id),
+                result: None,
+                error: Some(JsonRpcError::internal_error(&format!("Serialization error: {}", e))),
+            },
         }
     }
 
     fn make_tool_result(id: Value, content: Vec<ContentBlock>, is_error: Option<bool>) -> JsonRpcResponse {
         let call_result = ToolCallResult { content, is_error };
-        JsonRpcResponse {
-            jsonrpc: "2.0".into(),
-            id: Some(id),
-            result: Some(serde_json::to_value(call_result).unwrap()),
-            error: None,
+        match serde_json::to_value(call_result) {
+            Ok(v) => JsonRpcResponse {
+                jsonrpc: "2.0".into(),
+                id: Some(id),
+                result: Some(v),
+                error: None,
+            },
+            Err(e) => JsonRpcResponse {
+                jsonrpc: "2.0".into(),
+                id: Some(id),
+                result: None,
+                error: Some(JsonRpcError::internal_error(&format!("Serialization error: {}", e))),
+            },
         }
     }
 

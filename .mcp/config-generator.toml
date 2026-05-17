@@ -1,0 +1,2 @@
+vllm_url = "http://192.168.0.68:12340/v1"
+model = "gemma-4-26B-A4B-it"

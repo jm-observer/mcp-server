@@ -2,9 +2,11 @@ use crate::config::{RegisteredTool, ToolAction};
 use reqwest::{
     Client, Method,
     header::{HeaderMap, HeaderName, HeaderValue},
+    redirect,
 };
 use serde_json::Value;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use thiserror::Error;
 use urlencoding::encode;
 
@@ -20,10 +22,34 @@ pub enum HttpError {
     InvalidMethod(String),
     #[error("Invalid header: {0}")]
     InvalidHeader(String),
+    #[error("SSRF protection: request to private/loopback address is not allowed: {0}")]
+    SsrfBlocked(String),
 }
 
 pub struct HttpExecutor {
     client: Client,
+}
+
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+fn check_url_ssrf(url: &str) -> Result<(), HttpError> {
+    let parsed = url::Url::parse(url).map_err(|_| HttpError::MissingUrl)?;
+    if let Some(host) = parsed.host_str() {
+        if let Ok(ip) = host.parse::<IpAddr>()
+            && is_private_ip(ip)
+        {
+            return Err(HttpError::SsrfBlocked(host.to_string()));
+        }
+        if host == "metadata.google.internal" || host.ends_with(".internal") {
+            return Err(HttpError::SsrfBlocked(host.to_string()));
+        }
+    }
+    Ok(())
 }
 
 pub struct HttpResult {
@@ -40,7 +66,11 @@ impl Default for HttpExecutor {
 
 impl HttpExecutor {
     pub fn new() -> Self {
-        Self { client: Client::new() }
+        let client = Client::builder()
+            .redirect(redirect::Policy::limited(5))
+            .build()
+            .unwrap_or_default();
+        Self { client }
     }
 
     pub fn resolve_template_url_encoded(template: &str, args: &HashMap<String, Value>) -> Result<String, HttpError> {
@@ -139,6 +169,8 @@ impl HttpExecutor {
             return Err(HttpError::MissingUrl);
         }
 
+        check_url_ssrf(&url)?;
+
         let method_str = method_opt.as_deref().unwrap_or("GET");
         let method =
             Method::from_bytes(method_str.as_bytes()).map_err(|_| HttpError::InvalidMethod(method_str.to_string()))?;
@@ -157,7 +189,8 @@ impl HttpExecutor {
         }
 
         if let Some(ct) = content_type_opt {
-            headers.insert(reqwest::header::CONTENT_TYPE, HeaderValue::from_str(ct).unwrap());
+            let val = HeaderValue::from_str(ct).map_err(|_| HttpError::InvalidHeader(ct.clone()))?;
+            headers.insert(reqwest::header::CONTENT_TYPE, val);
         }
 
         req_builder = req_builder.headers(headers);

@@ -1,12 +1,18 @@
+use clap::Parser;
 use mcp::config::tool::ToolFile;
+use mcp_tool::config::CliArgs;
 
-/// 反序列化 tools.d/cargo_build.toml 并打印结构化内容
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "./tools.d/cargo/cargo_build.toml".to_string());
-    println!("==> 读取文件: {}", path);
+    let args = CliArgs::parse();
+
+    let workspace = custom_utils::args::workspace(&args.workspace, "mcp")?;
+
+    let relative_path = args
+        .command_name
+        .unwrap_or_else(|| "tools.d/cargo/cargo_build.toml".to_string());
+    let path = workspace.join(&relative_path);
+    println!("==> 读取文件: {}", path.display());
 
     let content = tokio::fs::read_to_string(&path).await?;
     let tool_file: ToolFile = toml::from_str(&content)?;

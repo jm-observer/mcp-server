@@ -3,7 +3,7 @@ use mcp::config::tool::ToolFile;
 
 /// 为单个 tool 生成独立的 TOML 文件内容
 pub fn generate_single_tool_toml(command_name: &str, output: &ToolOutput) -> String {
-    generate_toml_file(command_name, &[output.clone()])
+    generate_toml_file(command_name, std::slice::from_ref(output))
 }
 
 pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String {
@@ -22,7 +22,7 @@ pub fn generate_toml_file(command_name: &str, outputs: &[ToolOutput]) -> String 
 
     let toml_str = toml::to_string_pretty(&tool_file).unwrap();
     out.push_str(&toml_str);
-    return out;
+    out
 }
 
 #[cfg(test)]

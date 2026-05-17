@@ -11,6 +11,8 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+const OUTPUT_LIMIT: usize = 50 * 1024; // 50KB
+
 #[derive(Error, Debug)]
 pub enum CommandError {
     #[error("Template resolution error: {0}")]
@@ -26,6 +28,67 @@ pub enum CommandError {
 }
 
 pub struct CommandExecutor;
+
+#[cfg(windows)]
+async fn kill_process_tree(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+    } else {
+        let _ = child.kill().await;
+    }
+}
+
+#[cfg(not(windows))]
+async fn kill_process_tree(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+}
+
+struct LimitedRead {
+    data: Vec<u8>,
+    truncated: bool,
+}
+
+async fn read_limited(reader: &mut (impl AsyncReadExt + Unpin)) -> LimitedRead {
+    let mut buf = [0u8; 4096];
+    let mut data = Vec::new();
+    let mut total = 0;
+    let mut truncated = false;
+
+    loop {
+        match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                let remain = OUTPUT_LIMIT - total;
+                if remain == 0 {
+                    truncated = true;
+                    continue;
+                }
+                let to_take = n.min(remain);
+                data.extend_from_slice(&buf[..to_take]);
+                total += to_take;
+                if to_take < n {
+                    truncated = true;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    LimitedRead { data, truncated }
+}
+
+fn to_output_string(read: LimitedRead) -> String {
+    let mut s = String::from_utf8_lossy(&read.data).into_owned();
+    if read.truncated {
+        s.push_str("\n[output truncated at 50KB]");
+    }
+    s
+}
 
 #[derive(Serialize)]
 pub struct CommandResult {
@@ -176,7 +239,6 @@ impl CommandExecutor {
         info!("{cmd_exec} {resolved_args:?}");
 
         let mut child_cmd = Command::new(cmd_exec);
-        // Inherit the current process environment variables, then apply tool-specific ones
         for (key, value) in std::env::vars() {
             child_cmd.env(key, value);
         }
@@ -186,69 +248,27 @@ impl CommandExecutor {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
+        #[cfg(windows)]
+        {
+            child_cmd.creation_flags(0x00000008); // CREATE_NO_WINDOW
+        }
+
         let mut child = child_cmd.spawn()?;
 
-        let mut stdout = child.stdout.take().unwrap();
-        let mut stderr = child.stderr.take().unwrap();
+        let mut stdout = child.stdout.take().expect("stdout piped");
+        let mut stderr = child.stderr.take().expect("stderr piped");
 
         let timeout_duration = Duration::from_secs(tool.effective_timeout);
 
         let process_future = async {
-            let limit = 50 * 1024; // 50KB
-
-            let mut out_buf = Vec::new();
-            let mut buf = [0u8; 4096];
-            let mut out_len = 0;
-
-            let mut err_buf = Vec::new();
-            let mut err_buf_arr = [0u8; 4096];
-            let mut err_len = 0;
-
-            let out_reader = async {
-                loop {
-                    match stdout.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let remain = limit - out_len;
-                            if remain == 0 {
-                                continue;
-                            }
-                            let to_take = n.min(remain);
-                            out_buf.extend_from_slice(&buf[..to_take]);
-                            out_len += to_take;
-                        }
-                        Err(_) => break,
-                    }
-                }
-                out_buf
-            };
-
-            let err_reader = async {
-                loop {
-                    match stderr.read(&mut err_buf_arr).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let remain = limit - err_len;
-                            if remain == 0 {
-                                continue;
-                            }
-                            let to_take = n.min(remain);
-                            err_buf.extend_from_slice(&err_buf_arr[..to_take]);
-                            err_len += to_take;
-                        }
-                        Err(_) => break,
-                    }
-                }
-                err_buf
-            };
-
-            let (status, out_bytes, err_bytes) = tokio::join!(child.wait(), out_reader, err_reader);
+            let (status, out_read, err_read) =
+                tokio::join!(child.wait(), read_limited(&mut stdout), read_limited(&mut stderr));
 
             let exit_code = status.map(|s| s.code().unwrap_or(1)).unwrap_or(1);
 
             CommandResult {
-                stdout: String::from_utf8_lossy(&out_bytes).into_owned(),
-                stderr: String::from_utf8_lossy(&err_bytes).into_owned(),
+                stdout: to_output_string(out_read),
+                stderr: to_output_string(err_read),
                 exit_code,
             }
         };
@@ -256,7 +276,7 @@ impl CommandExecutor {
         match timeout(timeout_duration, process_future).await {
             Ok(res) => Ok(res),
             Err(_) => {
-                let _ = child.kill().await;
+                kill_process_tree(&mut child).await;
                 Err(CommandError::Timeout)
             }
         }
@@ -270,76 +290,34 @@ impl CommandExecutor {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
+        #[cfg(windows)]
+        {
+            child_cmd.creation_flags(0x00000008); // CREATE_NO_WINDOW
+        }
+
         let mut child = child_cmd.spawn()?;
 
-        let mut stdout = child.stdout.take().unwrap();
-        let mut stderr = child.stderr.take().unwrap();
+        let mut stdout = child.stdout.take().expect("stdout piped");
+        let mut stderr = child.stderr.take().expect("stderr piped");
 
         let process_future = async {
-            let limit = 50 * 1024; // 50KB
-
-            let mut out_buf = Vec::new();
-            let mut buf = [0u8; 4096];
-            let mut out_len = 0;
-
-            let mut err_buf = Vec::new();
-            let mut err_buf_arr = [0u8; 4096];
-            let mut err_len = 0;
-
-            let out_reader = async {
-                loop {
-                    match stdout.read(&mut buf).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let remain = limit - out_len;
-                            if remain == 0 {
-                                continue;
-                            }
-                            let to_take = n.min(remain);
-                            out_buf.extend_from_slice(&buf[..to_take]);
-                            out_len += to_take;
-                        }
-                        Err(_) => break,
-                    }
-                }
-                out_buf
-            };
-
-            let err_reader = async {
-                loop {
-                    match stderr.read(&mut err_buf_arr).await {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            let remain = limit - err_len;
-                            if remain == 0 {
-                                continue;
-                            }
-                            let to_take = n.min(remain);
-                            err_buf.extend_from_slice(&err_buf_arr[..to_take]);
-                            err_len += to_take;
-                        }
-                        Err(_) => break,
-                    }
-                }
-                err_buf
-            };
-
-            let (status, out_bytes, err_bytes) = tokio::join!(child.wait(), out_reader, err_reader);
+            let (status, out_read, err_read) =
+                tokio::join!(child.wait(), read_limited(&mut stdout), read_limited(&mut stderr));
 
             let exit_code = status.map(|s| s.code().unwrap_or(1)).unwrap_or(1);
 
             CommandResult {
-                stdout: String::from_utf8_lossy(&out_bytes).into_owned(),
-                stderr: String::from_utf8_lossy(&err_bytes).into_owned(),
+                stdout: to_output_string(out_read),
+                stderr: to_output_string(err_read),
                 exit_code,
             }
         };
 
-        let timeout_duration = Duration::from_secs(60); // Use large timeout
+        let timeout_duration = Duration::from_secs(60);
         match timeout(timeout_duration, process_future).await {
             Ok(res) => Ok(res),
             Err(_) => {
-                let _ = child.kill().await;
+                kill_process_tree(&mut child).await;
                 Err(CommandError::Timeout)
             }
         }

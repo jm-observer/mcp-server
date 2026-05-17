@@ -2,7 +2,7 @@ use crate::types::{CommandHelp, SubcommandInfo, ToolOutput};
 use async_openai::types::chat::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
 };
-use mcp::config::tool::ToolDef;
+use mcp::config::tool::{ToolAction, ToolDef};
 
 pub fn build_subcommand_prompt(command: &str, help_text: &str) -> Vec<ChatCompletionRequestMessage> {
     let system = r#"
@@ -109,11 +109,9 @@ The object represents one tool only (NOT a full ToolFile).
 
 Extract all CLI parameters from the help text and place them into the parameters array.
 
-Fixed parts of the command must be placed in:
+The executable binary name goes into `command` (e.g., "alarm-cli", "cargo", "git").
 
-action.command
-
-action.args
+If the command has subcommands (e.g., "cargo build", "git push", "alarm-cli create"), place the subcommand parts into the `subcommands` array (e.g., `["build"]`, `["push"]`, `["create"]`). Only include actual fixed subcommand words, not optional flags.
 
 Optional arguments MUST be represented via parameters[*].arg.
 
@@ -121,9 +119,11 @@ For parameters with `arg`, the `arg` array contains only the CLI flag prefix (e.
 
 For boolean parameters, `arg` contains the flag itself (e.g., `["--release"]`), which is added only when the value is true.
 
-Do NOT hardcode optional flags or values into action.args.
+Do NOT hardcode optional flags or values into `subcommands`.
 
 Do NOT invent parameters that are not explicitly present in the help text.
+
+Skip meta flags that are not meaningful for tool execution: `--help`/`-h`, `--version`/`-V`. Do NOT include them in the parameters array.
 
 If information is missing or unclear, use the minimal valid value required by the schema.
 
@@ -194,22 +194,48 @@ fn extract_json(response: &str) -> anyhow::Result<&str> {
     }
 
     // 3. 第一个 `{` 到最后一个 `}` 的截取
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed.rfind('}') {
-            if end > start {
-                return Ok(&trimmed[start..=end]);
-            }
-        }
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}'))
+        && end > start
+    {
+        return Ok(&trimmed[start..=end]);
     }
 
     anyhow::bail!("无法从 LLM 响应中提取 JSON 对象:\n{}", trimmed)
 }
 
 /// 从 LLM 响应中提取 JSON 并反序列化为 ToolDef。
+/// 如果 full_command 包含子命令（如 ["alarm-cli", "create"]），自动补全 subcommands 字段。
 pub fn parse_json_response(response: &str, command: Vec<String>) -> anyhow::Result<ToolOutput> {
     let json_str = extract_json(response)?;
-    let tool_def: ToolDef = serde_json::from_str(json_str)
+    let mut tool_def: ToolDef = serde_json::from_str(json_str)
         .map_err(|e| anyhow::anyhow!("JSON 反序列化为 ToolDef 失败: {}\nJSON 内容:\n{}", e, json_str))?;
+
+    if command.len() > 1 {
+        let expected_subs: Vec<String> = command[1..].to_vec();
+        if let ToolAction::Command { ref mut subcommands, .. } = tool_def.action {
+            match subcommands {
+                Some(existing) if existing.is_empty() => {
+                    *existing = expected_subs;
+                }
+                None => {
+                    *subcommands = Some(expected_subs);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // 过滤掉 --help/-h, --version/-V 等 meta 参数
+    if let Some(ref mut params) = tool_def.parameters {
+        params.retain(|p| {
+            let dominated_by_meta = p.arg.as_ref().is_some_and(|args| {
+                args.iter()
+                    .any(|a| matches!(a.as_str(), "--help" | "-h" | "--version" | "-V"))
+            });
+            !dominated_by_meta
+        });
+    }
+
     Ok(ToolOutput { tool_def, command })
 }
 

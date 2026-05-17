@@ -1,17 +1,29 @@
 use clap::Parser;
+use serde::Deserialize;
 
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "MCP Tool Generator - creates tool definitions by inspecting commands", long_about = None)]
-pub struct GeneratorConfig {
-    #[arg(short = 'w', long, default_value = "~/.config/mcp")]
-    pub workspace: String,
-
-    #[arg(short = 'u', long, default_value = "http://localhost:12340")]
-    pub vllm_url: String,
-
-    #[arg(short = 'm', long, default_value = "openai/gpt-oss-120b")]
-    pub model: String,
+pub struct CliArgs {
+    #[arg(short = 'w', long)]
+    pub workspace: Option<String>,
 
     #[arg()]
-    pub command_name: String,
+    pub command_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GeneratorConfig {
+    #[serde(default = "default_vllm_url")]
+    pub vllm_url: String,
+
+    #[serde(default = "default_model")]
+    pub model: String,
+}
+
+fn default_vllm_url() -> String {
+    "http://localhost:12340/v1".to_string()
+}
+
+fn default_model() -> String {
+    "openai/gpt-oss-120b".to_string()
 }

@@ -54,7 +54,9 @@ impl<'a> HelpCrawler<'a> {
         let mut nodes = vec![node];
         match self.llm_client.chat(prompt).await {
             Ok(response) => {
-                let subcommands = prompt::parse_subcommands_response(&response);
+                let mut subcommands = prompt::parse_subcommands_response(&response);
+                // 过滤掉 CLI 自动生成的 `help` 子命令
+                subcommands.retain(|s| s.command != "help");
                 log::info!("Found subcommands for {}: {:?}", cmd_str, subcommands);
 
                 if subcommands.is_empty() {

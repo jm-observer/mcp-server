@@ -1,0 +1,9 @@
+# mcp-tool-generator configuration
+# Place this file at: <workspace>/config-generator.toml
+# Default workspace: ~/.config/mcp
+
+# LLM API endpoint (OpenAI-compatible)
+vllm_url = "http://localhost:12340/v1"
+
+# Model name
+model = "openai/gpt-oss-120b"

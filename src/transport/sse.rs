@@ -99,7 +99,9 @@ impl SessionManager {
         }
     }
 
-    /// Mark a session's SSE connection as disconnected
+    /// Mark a session's SSE connection as disconnected.
+    /// The session is kept briefly for the TTL period in case the client reconnects,
+    /// but we close the old sender to free buffered messages.
     pub fn mark_disconnected(&self, session_id: &str) {
         if let Some(mut entry) = self.sessions.get_mut(session_id) {
             entry.sse_connected = false;

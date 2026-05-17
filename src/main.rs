@@ -9,7 +9,7 @@ use mcp::transport::sse::SessionManager;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -25,10 +25,9 @@ struct Cli {
     #[arg(
         short = 'w',
         long = "cwd",
-        default_value = "~/.config/mcp",
         help = "Working directory containing config.toml and tools.d"
     )]
-    cwd: String,
+    cwd: Option<String>,
 
     #[arg(long = "stdio", help = "Run in stdio mode (for CLI integration)")]
     stdio: bool,
@@ -186,8 +185,6 @@ fn load_prompt_files(dir: &Path, registry: &mut PromptRegistry) -> std::io::Resu
     Ok(())
 }
 
-// cargo build --workspace --features prod
-// cargo run --bin mcp-client -- '{"id":6,"jsonrpc":"2.0","method":"tools/call","params":{"arguments":{"command_name":"git log","workspace":"/home/fengqi/.config/mcp"},"name":"mcp-tool"}}'
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
@@ -199,23 +196,24 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    let raw_path = args.cwd.clone();
-    let workspace_path = if let Some(stripped) = raw_path.strip_prefix("~/") {
-        let home = std::env::var("HOME").expect("HOME environment variable not set");
-        PathBuf::from(home).join(stripped)
-    } else if raw_path == "~" {
-        PathBuf::from(std::env::var("HOME").expect("HOME environment variable not set"))
-    } else {
-        PathBuf::from(raw_path)
-    };
+    let workspace_path = custom_utils::args::workspace(&args.cwd, "mcp")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
     info!("Workspace directory: {}", workspace_path.display());
     // The config file is expected to be 'config.toml' inside this workspace
     let config_path = workspace_path.join("config.toml");
     let server_config = if config_path.exists() {
         let content = fs::read_to_string(&config_path)?;
-        toml::from_str::<ServerConfig>(&content).expect("Failed to parse config")
+        toml::from_str::<ServerConfig>(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse {}: {}", config_path.display(), e),
+            )
+        })?
     } else {
-        panic!("Config file not found: {:?}", config_path);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Config file not found: {}", config_path.display()),
+        ));
     };
     info!("Loaded server config");
 

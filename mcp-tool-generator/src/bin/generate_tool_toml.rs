@@ -1,3 +1,5 @@
+use clap::Parser;
+use mcp_tool::config::{CliArgs, GeneratorConfig};
 use mcp_tool::llm_client::LlmClient;
 use mcp_tool::prompt;
 use mcp_tool::toml_output;
@@ -6,12 +8,29 @@ use mcp_tool::types::CommandHelp;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     custom_utils::logger::logger_stdout_debug();
-    let help_text = tokio::fs::read_to_string("./res/cargo_build_help").await?;
+    let args = CliArgs::parse();
+
+    let workspace = custom_utils::args::workspace(&args.workspace, "mcp")?;
+    log::info!("Workspace directory: {}", workspace.display());
+
+    let config_path = workspace.join("config-generator.toml");
+    let config: GeneratorConfig = if config_path.exists() {
+        let content = tokio::fs::read_to_string(&config_path).await?;
+        toml::from_str(&content)?
+    } else {
+        GeneratorConfig {
+            vllm_url: "http://localhost:12340/v1".to_string(),
+            model: "openai/gpt-oss-120b".to_string(),
+        }
+    };
+
+    let help_path = workspace.join("res").join("cargo_build_help");
+    let help_text = tokio::fs::read_to_string(&help_path).await?;
     let full_command: Vec<String> = "cargo build".split_whitespace().map(String::from).collect();
     let cmd_str = full_command.join(" ");
     println!("==> 命令: {}", cmd_str);
 
-    let llm = LlmClient::new("http://127.0.0.1:12340/v1", "openai/gpt-oss-120b");
+    let llm = LlmClient::new(&config.vllm_url, &config.model);
     let schema = mcp::config::tool_config_schema();
     println!("==> Schema: {schema}");
     let flat = CommandHelp {
@@ -32,7 +51,9 @@ async fn main() -> anyhow::Result<()> {
     let final_toml = toml_output::generate_toml_file(&cmd_str, &[tool_output]);
     println!("==> 生成的 TOML:\n{}", final_toml);
 
-    tokio::fs::write("./tools.d/cargo_build.toml", &final_toml).await?;
-    println!("==> 已保存到 ./tools.d/cargo_build.toml");
+    let out_path = workspace.join("tools.d").join("cargo_build.toml");
+    tokio::fs::create_dir_all(out_path.parent().unwrap()).await?;
+    tokio::fs::write(&out_path, &final_toml).await?;
+    println!("==> 已保存到 {}", out_path.display());
     Ok(())
 }
