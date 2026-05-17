@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "//d/git"
+    ],
+    "allow": [
+      "Bash(cargo *)",
+      "Bash(rustc *)",
+      "Bash(git *)",
+      "Bash(xargs *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(ls *)",
+      "Bash(cd *)",
+      "Bash(Remove-Item *)",
+      "Bash(Write-Host *)",
+      "Bash(Get-ChildItem *)",
+      "Bash(Select-Object *)",
+      "Bash(Sort-Object *)",
+      "PowerShell(cargo *)",
+      "PowerShell(git worktree *)",
+      "Read(//d/git/**)",
+      "Edit(//d/git/**)",
+      "Write(//d/git/**)"
+    ]
+  }
+}
