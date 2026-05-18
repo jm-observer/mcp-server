@@ -1,6 +1,6 @@
 use actix_web::{App, HttpResponse, HttpServer, Responder, web};
 use bytes::Bytes;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use log::{LevelFilter::Debug, error, info};
 use mcp::config::{PromptFile, PromptRegistry, ServerConfig, ToolFile, ToolRegistry};
 use mcp::protocol::McpHandler;
@@ -19,18 +19,36 @@ use std::sync::Arc;
     about = "MCP - A Model Context Protocol server implementation"
 )]
 struct Cli {
-    #[arg(long = "schema", help = "Print tool configuration schema (JSON)")]
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    #[arg(long = "schema", help = "Print tool configuration schema (JSON)", global = true)]
     schema: bool,
 
     #[arg(
         short = 'w',
         long = "cwd",
-        help = "Working directory containing config.toml and tools.d"
+        help = "Working directory containing config.toml and tools.d",
+        global = true,
     )]
     cwd: Option<String>,
 
     #[arg(long = "stdio", help = "Run in stdio mode (for CLI integration)")]
     stdio: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Self-update from the latest GitHub release
+    Update {
+        #[arg(long)]
+        force: bool,
+    },
+    /// Install as a systemd service (Linux, requires root)
+    Install {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -188,6 +206,44 @@ fn load_prompt_files(dir: &Path, registry: &mut PromptRegistry) -> std::io::Resu
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Cli::parse();
+
+    match &args.command {
+        Some(Commands::Update { force }) => {
+            use custom_utils::updater::{UpdateConfig, UpdateOutcome};
+            let outcome = UpdateConfig::new(
+                "jm-observer", "mcp-server", env!("CARGO_PKG_VERSION"),
+            )
+            .bin_name("mcp")
+            .force(*force)
+            .execute()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            match outcome {
+                UpdateOutcome::UpToDate { current, latest } => {
+                    println!("Already up to date (current {current}, latest {latest})");
+                }
+                UpdateOutcome::Updated { from, to, bins } => {
+                    println!("Updated {from} -> {to}: {}", bins.join(", "));
+                }
+            }
+            return Ok(());
+        }
+        Some(Commands::Install { dry_run }) => {
+            let svc = custom_utils::updater::ServiceConfig::new("mcp")
+                .description("MCP - Model Context Protocol server")
+                .exec_args("-w {workspace}")
+                .binaries(["mcp"]);
+            if *dry_run {
+                print!("{}", svc.generate_unit());
+            } else {
+                svc.install()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                println!("Installed. Start with: sudo systemctl start mcp");
+            }
+            return Ok(());
+        }
+        None => {}
+    }
 
     let _ = custom_utils::logger::logger_feature("mcp", Debug, Debug, false).build();
 

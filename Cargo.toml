@@ -19,7 +19,7 @@ repository = "https://github.com/jm-observer/mcp-server"
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
-custom-utils = "0.11.7"
+custom-utils = { version = "0.12.0", features = ["updater", "updater-systemd"] }
 log = "0.4.29"
 mcp = { path = "." }
 serde = { version = "1.0.228", features = ["derive"] }
