@@ -674,9 +674,9 @@ dependencies = [
 
 [[package]]
 name = "custom-utils"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c99741ae8ac30a7318b89383a86c20e0a5a8a676168df1cda97cec3fb072f01"
+checksum = "f1c1ebdb62b61cbe0912dd03a51f87297943579b4dadaf359535b5ddebf30507"
 dependencies = [
  "ansi_term",
  "anyhow",
@@ -1723,7 +1723,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "mcp"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -1751,7 +1751,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-tool"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-openai",

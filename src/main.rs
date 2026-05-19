@@ -217,6 +217,10 @@ async fn main() -> std::io::Result<()> {
         return Ok(());
     }
 
+    // 0.14 起 unit 恒为 Type=notify：必须尽早 spawn 才会发送 READY=1，
+    // 否则 systemd 启动超时。放在重的配置/工具加载之前。非 systemd 下自禁用。
+    let _wd = svc.spawn_watchdog();
+
     // workspace 统一走 svc：默认 ~/.config/mcp（与 args::workspace 一致），
     // -w/--workspace/--cwd 覆盖（同时作用于 install 与运行时，与单元 WorkingDirectory 一致）。
     let cwd =
@@ -278,9 +282,6 @@ async fn main() -> std::io::Result<()> {
         Arc::new(server_config.clone()),
         Arc::new(prompt_registry),
     );
-
-    // updater 下恒可用；prod + Linux 才真正发心跳，否则 no-op。
-    let _wd = svc.spawn_watchdog();
 
     if std::env::args().any(|a| a == "--stdio") {
         mcp::transport::stdio::run_stdio(Arc::new(handler)).await

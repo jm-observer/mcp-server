@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.1"          # ← 这里统一设置你想要的版本
+version = "0.2.2"          # ← 这里统一设置你想要的版本
 edition = "2024"           # 推荐也一起继承
 license = "MIT"
 #license-file = "LICENSE"
@@ -19,7 +19,7 @@ repository = "https://github.com/jm-observer/mcp-server"
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4", features = ["derive"] }
-custom-utils = { version = "0.13", default-features = false, features = ["logger", "updater"] }
+custom-utils = { version = "0.14", default-features = false, features = ["logger", "updater"] }
 log = "0.4.29"
 mcp = { path = "." }
 serde = { version = "1.0.228", features = ["derive"] }
