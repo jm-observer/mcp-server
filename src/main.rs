@@ -1,6 +1,6 @@
 use actix_web::{App, HttpResponse, HttpServer, Responder, web};
 use bytes::Bytes;
-use clap::{Parser, Subcommand};
+use custom_utils::updater::{CliAction, DeployCommand, LinuxService};
 use log::{LevelFilter::Debug, error, info};
 use mcp::config::{PromptFile, PromptRegistry, ServerConfig, ToolFile, ToolRegistry};
 use mcp::protocol::McpHandler;
@@ -12,43 +12,26 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Parser, Debug)]
-#[command(
-    name = "mcp",
-    version,
-    about = "MCP - A Model Context Protocol server implementation"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
-    #[arg(long = "schema", help = "Print tool configuration schema (JSON)", global = true)]
-    schema: bool,
-
-    #[arg(
-        short = 'w',
-        long = "cwd",
-        help = "Working directory containing config.toml and tools.d",
-        global = true,
-    )]
-    cwd: Option<String>,
-
-    #[arg(long = "stdio", help = "Run in stdio mode (for CLI integration)")]
-    stdio: bool,
+/// 宿主拥有顶层 CLI，把部署子命令作为透传变体嵌入；
+/// `LinuxService::parse_deploy()` 未匹配即本项目的服务命令。
+enum AppCmd {
+    /// 本项目命令：运行 MCP 服务（SSE + HTTP，或 --stdio）。
+    Serve,
+    /// 透传给 `LinuxService::dispatch` 的部署子命令（库不读 argv/不碰 stdout）。
+    Deploy(DeployCommand),
 }
 
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Self-update from the latest GitHub release
-    Update {
-        #[arg(long)]
-        force: bool,
-    },
-    /// Install as a systemd service (Linux, requires root)
-    Install {
-        #[arg(long)]
-        dry_run: bool,
-    },
+/// 本项目自有 usage；与库的 deploy 用法段拼接后由本项目打印。
+fn project_usage() -> String {
+    "Usage: mcp [OPTIONS]\n\
+     \n\
+     Run the MCP server: SSE + HTTP RPC, or stdio mode for Claude Desktop.\n\
+     \n\
+     Options:\n  \
+     -w, --workspace <DIR>  Dir with config.toml and tools.d (alias: --cwd; default: ~/.config/mcp)\n      \
+     --stdio            Run in stdio mode (for Claude Desktop / CLI integration)\n      \
+     --schema           Print tool configuration JSON Schema and exit"
+        .to_string()
 }
 
 #[derive(Clone)]
@@ -205,55 +188,44 @@ fn load_prompt_files(dir: &Path, registry: &mut PromptRegistry) -> std::io::Resu
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let args = Cli::parse();
+    // 统一 Linux 部署栈：配置一次，派生 install / update / workspace / watchdog。
+    let svc = LinuxService::new("mcp", "jm-observer", "mcp-server", env!("CARGO_PKG_VERSION"))
+        .description("MCP - Model Context Protocol server")
+        .extra_bins(["mcp-tool"]);
 
-    match &args.command {
-        Some(Commands::Update { force }) => {
-            use custom_utils::updater::{UpdateConfig, UpdateOutcome};
-            let outcome = UpdateConfig::new(
-                "jm-observer", "mcp-server", env!("CARGO_PKG_VERSION"),
-            )
-            .bin_name("mcp")
-            .force(*force)
-            .execute()
-            .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            match outcome {
-                UpdateOutcome::UpToDate { current, latest } => {
-                    println!("Already up to date (current {current}, latest {latest})");
-                }
-                UpdateOutcome::Updated { from, to, bins } => {
-                    println!("Updated {from} -> {to}: {}", bins.join(", "));
-                }
-            }
-            return Ok(());
+    // 透传式 CLI：库轻量解析 argv；未匹配则交还本项目自理。
+    let cmd = match svc.parse_deploy() {
+        Some(c) => AppCmd::Deploy(c),
+        None => AppCmd::Serve,
+    };
+
+    if let AppCmd::Deploy(c) = cmd {
+        // 库不碰 stdout：文本结果由本项目打印；--help 拼接本项目自有 usage。
+        match svc.dispatch(c).await.map_err(std::io::Error::other)? {
+            CliAction::DryRun(t) | CliAction::Version(t) => println!("{t}"),
+            CliAction::Help(t) => println!("{}\n\n{}", project_usage(), t),
+            CliAction::Handled => {}
+            CliAction::Run { .. } => unreachable!(),
         }
-        Some(Commands::Install { dry_run }) => {
-            let svc = custom_utils::updater::ServiceConfig::new("mcp")
-                .description("MCP - Model Context Protocol server")
-                .exec_args("-w {workspace}")
-                .binaries(["mcp"]);
-            if *dry_run {
-                print!("{}", svc.generate_unit());
-            } else {
-                svc.install()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-                println!("Installed. Start with: sudo systemctl start mcp");
-            }
-            return Ok(());
-        }
-        None => {}
+        return Ok(());
     }
 
     let _ = custom_utils::logger::logger_feature("mcp", Debug, Debug, false).build();
 
-    if args.schema {
+    if std::env::args().any(|a| a == "--schema") {
         println!("{}", mcp::config::tool_config_schema());
         return Ok(());
     }
 
-    let workspace_path = custom_utils::args::workspace(&args.cwd, "mcp")
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
+    // workspace 统一走 svc：默认 ~/.config/mcp（与 args::workspace 一致），
+    // -w/--workspace/--cwd 覆盖（同时作用于 install 与运行时，与单元 WorkingDirectory 一致）。
+    let cwd =
+        custom_utils::args::arg_value("--workspace", "-w").or_else(|| custom_utils::args::arg_value("--cwd", "-w"));
+    let workspace_path = match &cwd {
+        Some(w) => svc.clone().workspace_arg(w).workspace(),
+        None => svc.workspace(),
+    }
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
     info!("Workspace directory: {}", workspace_path.display());
     // The config file is expected to be 'config.toml' inside this workspace
     let config_path = workspace_path.join("config.toml");
@@ -307,7 +279,10 @@ async fn main() -> std::io::Result<()> {
         Arc::new(prompt_registry),
     );
 
-    if args.stdio {
+    // updater 下恒可用；prod + Linux 才真正发心跳，否则 no-op。
+    let _wd = svc.spawn_watchdog();
+
+    if std::env::args().any(|a| a == "--stdio") {
         mcp::transport::stdio::run_stdio(Arc::new(handler)).await
     } else {
         let http_handler = handler.clone();
